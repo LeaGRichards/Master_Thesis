@@ -1,0 +1,1056 @@
+# Updataed: 26-08-2026
+
+##################################################################
+######################### COVARIATE HUNT #########################
+##################################################################
+
+# Studies
+  
+# Slovakia model: Guimarães, N. F., Álvares, F., Kropil, R., & Smolko, P. (2025). 
+    # Where the wolves wander? Habitat selection of grey wolves in relation to 
+    # anthropogenic pressure in the Western Carpathians. European Journal of Wildlife 
+    # Research, 71(5), 101. https://doi.org/10.1007/s10344-025-01974-9
+
+  # Portugal model: Rio-Maior, H., Nakamura, M., Álvares, F., & Beja, P. (2019). 
+    # Designing the landscape of coexistence: Integrating risk avoidance, habitat 
+    # selection and functional connectivity to inform large carnivore conservation. 
+    # Biological Conservation, 235, 178–188. https://doi.org/10.1016/j.biocon.2019.04.021
+
+# Covariate and associated study (in order found in script)
+  
+# Water bodies
+  # Distance to water (Guimarães et al., 2025)
+  # Rivers (Rio-Maior et al., 2019)
+  # Streams (Rio-Maior et al., 2019)
+  # Topography
+  # Slope (Rio-Maior et al., 2019 + Guimarães et al., 2025)
+  # Eastness (Guimarães et al., 2025)
+  # Elevation (Rio-Maior et al., 2019)
+  # Landcover 
+  # Landcover type - 6 levels (Guimarães et al., 2025)
+  # Open (Rio-Maior et al., 2019)
+  # Tree cover density (Guimarães et al., 2025)
+  # Night-time light (Guimarães et al., 2025)
+  # Snow cover duration (Guimarães et al., 2025)
+  # Roads (Rio-Maior et al., 2019)
+  # Trails (Rio-Maior et al., 2019)
+  # Settlements (Rio-Maior et al., 2019)
+  # Livestock (Rio-Maior et al., 2019)
+
+# Important: All covariates were re-projected or re-sampled to fit a 50m template at the CRS of EPSG:3035
+
+#####################
+### Startup lines ###
+#####################
+
+# Basic needs
+  library(terra) # For vect(), rast(), classify(), etc.
+  library(osmextract) # For oe_read()
+  library(sf)
+  dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
+  terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
+  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
+  italy_cont_4326 <- vect("/Volumes/Storage/data_processed/italy_cont_4326.gpkg")
+
+# Creating an empty raster of Italy with a 50m resolution and a nested 10m grid
+  template <- rast(ext(italy_cont), resolution = 50, crs = crs(italy_cont))
+    # makes an empty 50m rectangular raster around Italy (so it includes surrounding sea and countries)
+  italy_mask <- rasterize(italy_cont, template, field = 1)
+    # all the mainland pixel now have the value 1, the rest have the value NA
+  template_10m <- rast(ext(template), nrows = nrow(template) * 5, 
+    ncols = ncol(template) * 5, crs = crs(template))
+  res(template_10m) # 10m, good
+
+
+# Raw Italy data
+  lakes_it <- vect("/Volumes/Storage/raw_italy_data/lakes_it.gpkg")
+  rivers_it <- vect("/Volumes/Storage/raw_italy_data/rivers_it.gpkg")
+  roads_it <- vect("/Volumes/Storage/raw_italy_data/roads_it.gpkg")
+  trails_it_3035 <- vect("/Volumes/Storage/raw_italy_data/trails_it_3035.gpkg")  
+
+####################################################
+### Creating the boundaries of continental Italy ###
+####################################################
+
+# Source:
+  # Eurostat. (2024). GISCO: Geographical Information and Maps—Countries—Administrative 
+    # Units—Statistical Units (01M) [Data set]. 
+    # https://ec.europa.eu/eurostat/web/gisco/geodata/administrative-units/countries
+  # year : 2024, scale : 01M, file formal GeoPackage
+  # CRS : EPSG 3035 and EPSG:4326
+
+# EPSG:3035
+  
+  # Calling the raw data
+    countries <- vect("/Volumes/Storage/raw_data/italy_cont_3035.gpkg")
+    class(countries) # SpatVector
+  
+  # Isolating Italy as a country
+    names(countries) # "CNTR_NAME" is of interest
+    countries$CNTR_NAME # "Italia"
+    italy <- countries[countries$CNTR_NAME == "Italia", ]
+    plot(italy) # contains islands
+  
+  # Isolating continental Italy
+    geomtype(italy) # "polygons"
+    italy_parts <- disagg(italy) # break Italy in multiple polygons
+    nrow(italy_parts) # 117 polygons to be exact
+    italy_parts$area_km2 <- expanse(italy_parts, unit="km") # associate the correct are with the new polygons
+    head(sort(italy_parts$area_km2, decreasing=TRUE)) # Mainland has 250397.10080 km2
+    areas <- expanse(italy_parts, unit = "km") 
+    italy_cont <- italy_parts[which.max(areas), ] 
+    plot(italy_cont) # beautiful polygon of continental Italy :D
+    crs(italy_cont) # EPSG:3035 (ETRS89 / LAEA Europe, meters)
+    ext(italy_cont) # xmin, xmax, ymin, ymax
+      # 4055225.3627000004, 5049412.3911000006, 1667806.4662999995, 2666691.3880000003
+  
+  # Saving as processed data
+    terra::writeVector(italy_cont, 
+      filename = "/Volumes/Storage/data_processed/italy_cont.gpkg", overwrite = TRUE)
+      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+  
+# EPSG:4326
+    
+  # Calling the raw data
+    countries_4326 <- vect("/Volumes/Storage/raw_data/italy_cont_4326.gpkg")
+    class(countries_4326) # SpatVector
+    crs(countries_4326)
+  
+  # Isolating Italy as a country
+    names(countries_4326) # "CNTR_NAME" is of interest
+    countries$CNTR_NAME # "Italia"
+    italy_4326 <- countries_4326[countries_4326$CNTR_NAME == "Italia"]
+  
+  # Isolating continental Italy
+    italy_parts_4326 <- disagg(italy_4326) # break Italy in multiple polygons
+    italy_parts_4326$area_km2 <- expanse(italy_parts_4326) # Calculates the area of each polygon
+    head(sort(italy_parts_4326$area_km2, decreasing=TRUE))
+    areas <- expanse(italy_parts_4326) 
+    italy_cont_4326 <- italy_parts_4326[which.max(areas), ] 
+    plot(italy_cont_4326) # beautiful polygon of continental Italy :D
+    crs(italy_cont_4326) # EPSG:4326
+  
+  # Saving as processed data
+    terra::writeVector(italy_cont_4326, 
+      filename = "/Volumes/Storage/data_processed/italy_cont_4326.gpkg", overwrite = TRUE)
+      # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+#########################################
+### Preparing water bodies covariates ###
+#########################################
+
+# Covariates: 
+  # Distance to water: Euclidean distance to closest water source -> Guimarães et al. 2025 (Slovakia)
+  # Rivers: Proportion of occupation by 1st and 2nd order waterlines -> Rio-Maior et al. 2019
+  # Streams: Proportion of occupation by 3rd order waterlines -> Rio-Maior et al. 2019
+    # To consider : the Guimarães article and additional information don't mention the detail 
+    # of what they considered as water.
+
+# Source : HydroRIVERS and HydroLAKES
+  # Messager, M. L., Lehner, B., Grill, G., Nedeva, I., & Schmitt, O. (2016). 
+    # Estimating the volume and age of water stored in global lakes using a geo-statistical 
+    # approach. Nature Communications, 7(1), 13603. https://doi.org/10.1038/ncomms13603
+  # To consider that lakes include reservoirs (human-made water bodies) but may omit small 
+    # ponds and animal drinking holes, but since this is a large scale study, it's fine
+
+# Calling the raw data
+  rivers <- vect("/Volumes/Storage/raw_data/HydroRIVERS_v10_eu.shp")
+  class(rivers) # SpatVector
+  crs(rivers) # EPSG:4326 (WGS84 geographic coordinates, degrees)
+
+  lakes <- vect("/Volumes/Storage/raw_data/HydroLAKES_polys_v10.shp")
+  class(lakes) # SpatVector
+  crs(lakes) # EPSG:4326 (WGS84 geographic coordinates, degrees)
+
+# Re-projecting to EPSG:3035
+  rivers <- project(rivers, crs(italy_cont)) # re-projecting to EPSG:3035
+  lakes <- project(lakes, crs(italy_cont)) # re-projecting to EPSG:3035
+
+# Limiting to continental Italy
+  rivers_it <- intersect(rivers, italy_cont)
+  lakes_it <- intersect(lakes, italy_cont) 
+    # Chose the function intersect() as it cuts the lines and polygons to fit the map of Italy. Nothing beyond.
+
+# Saving as raw Italy data to call if R crashes
+  terra::writeVector(rivers_it,
+    filename = "/Volumes/Storage/raw_italy_data/rivers_it.gpkg", overwrite = TRUE)
+
+  terra::writeVector(lakes_it, 
+    filename = "/Volumes/Storage/raw_italy_data/lakes_it.gpkg", overwrite = TRUE)
+
+# Checking the data (specifically the river orders)
+  names(rivers_it) # "ORD_STRA" is the Strahler stream order (there are 6 orders)
+    # higher orders are the biggest (have more streams pouring into them)
+  
+  table(rivers_it$ORD_STRA) # the number of rivers in each order 
+    # 1st order has 52.43% of rivers
+    # 2nd order has 23.45% of rivers (2nd + 3rd + 4th + 5th + 6th orders = 47.57% of rivers)
+    # 3rd order has 13.51% of rivers (3rd + 4th + 5th + 6th orders = 24.12% of rivers)
+    # 4th order has 6.12% of rivers (4th + 5th + 6th orders = 10.61% of rivers)
+    # 5th order has 3.35 % of rivers (5th + 6th orders = 4.48% of rivers)
+    # 6th order has 1.14% of rivers 
+  
+  # I chose to keep all orders for the Guimarães et al. article as wolves will drink from 
+    # any water source (small or big) and there are no mention of order filtering in the article 
+
+  plot(italy_cont)
+  plot(rivers_it, add = TRUE)
+  plot(lakes_it, add = TRUE) # looks good :) 
+
+# Distance to water:
+  
+  # Rasterizing the rivers and lakes (each pixel will get 1 if there is a river and NA if none)
+    rivers_r <- rasterize(rivers_it, template, field = 1)
+    lakes_r <- rasterize(lakes_it, template, field = 1)
+  
+  # Merging both rivers' and lakes' rasters
+    water_source_r <- cover(rivers_r, lakes_r)
+  
+  # Calculating the euclidean distance of each pixel 
+    # a pixel with no water will be x meters away from the nearest water source (pixel with water)
+    # a pixel with water will have the value 0
+    dist_water_source_r <- distance(water_source_r)
+    dist_water_source_r <- mask(dist_water_source_r,italy_mask) # removing every pixel surrounding Italy
+    global(dist_water_source_r, c("min","max"), na.rm=TRUE) # 0 to 12925.19
+    hist(values(dist_water_source_r)) # min 0, max 12925.19m
+    plot(dist_water_source_r, main = "Distance to Water Source") # checking the data
+    plot(italy_cont, add=TRUE) # Looks good! :) 
+  
+  # Saving as processed data
+    terra::writeRaster(dist_water_source_r, 
+      filename = "/Volumes/Storage/data_processed/dist_water_source_r.tif", overwrite = TRUE)
+      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+# Rivers and streams:
+  
+  # Choice to make : the covariates refer the 1st, 2nd and 3rd order waterlines. 
+    # The study area is much smaller than the whole of continental Italy. In the 
+    # study area, there might have only been those 3 orders, unlike Italy. I can 
+    # either reproduce the mathematically identical variable (1st and 2nd, 3rd order), 
+    # or I reproduce the ecologically significant variable (small vs big waterlines).
+    # I choose to divide small waterlines as orders 1 and 2 ("streams") and big waterlines 
+    # as orders 3 and above as the author said "big rivers are not home sites".
+  
+  # tapply(rivers_it$LENGTH_KM, rivers_it$ORD_STRA, sum) -> giving the proportions
+    # 1        2        3        4        5        6 
+    # 35081.07 16860.20  9168.54  3818.24  1772.54   671.40 
+    # Total = 67371.99
+    # 1 = 0.520707
+    # 2 = 0.2502553
+    # 3 = 0.1360883
+    # 4 = 0.056674
+    # 5 = 0.02630975
+    # 6 = 0.009965566
+    # 4 + 5 + 6 = 0.22903762
+  
+  # Isolating the chosen orders
+    rivers_3_6 <- rivers_it[rivers_it$ORD_STRA >= 3, ]
+    streams_1_2 <- rivers_it[rivers_it$ORD_STRA <= 2, ]
+  
+  # Rasterizing the total polyline length per cell
+    streams_length_r <- rasterizeGeom(streams_1_2, template, fun = "length")
+    rivers_length_r  <- rasterizeGeom(rivers_3_6,  template, fun = "length")
+  
+  # Setting NAs to zero
+    streams_length_r <- subst(streams_length_r, NA, 0)
+    rivers_length_r  <- subst(rivers_length_r,  NA, 0)
+  
+  # Limiting again to continental Italy (subst will fill the sea cells)  
+    streams_length_r <- mask(crop(streams_length_r, italy_cont), italy_cont)
+    rivers_length_r  <- mask(crop(rivers_length_r,  italy_cont), italy_cont)
+  
+  # Converting lengths to proportions (m/m2) (50m cell is 2500m2)
+    streams_prop_r <- streams_length_r / 2500
+    rivers_prop_r  <- rivers_length_r  / 2500
+  
+  # Check that the data looks good
+    global(streams_prop_r, c("min", "max", "mean"), na.rm = TRUE) # 0 to 0.05007223, mean of 0.0002063524
+    global(rivers_prop_r,  c("min", "max", "mean"), na.rm = TRUE) # 0 to 0.04853503, mean of 6.139596e-05
+    plot(streams_prop_r, main = "Streams proportion (orders 1–2)") # Looks good
+    plot(rivers_prop_r,  main = "Rivers proportion  (orders 3–6)") # Looks good
+  
+  # Saving as processed data
+    terra::writeRaster(streams_prop_r,
+      filename  = "/Volumes/Storage/data_processed/streams_50m.tif",overwrite = TRUE)
+  
+    terra::writeRaster(rivers_prop_r,
+      filename  = "/Volumes/Storage/data_processed/rivers_50m.tif", overwrite = TRUE)
+      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+
+#######################################
+### Preparing topography covariates ###
+#######################################
+
+# Covariates: 
+  # Slope -> Rio-Maior et al., 2019, Guimarães et al., 2025
+  # Eastness -> Guimarães et al., 2025
+  # Elevation -> Rio-Maior et al., 2019
+
+# Source : Tinitaly 1.1. 
+  # Tarquini, S., Isola, I., Favalli, M., Battistini, A., & Dotta, G. (2023). 
+    # TINITALY, a digital elevation model of Italy with a 10 meters cell size, 
+    # version 1.1 (Version 1.1) [Application/zip,image/tiff]. Istituto Nazionale 
+    # di Geofisica e Vulcanologia (INGV). https://doi.org/10.13127/TINITALY/1.1
+  # Had to download each individual tile including the study area (MANY TILES)
+
+# Calling the raw data (all the DEM files)
+  dem_files <- list.files("/Volumes/Storage/raw_data/TIFF_maps_Italy",
+    pattern = "\\.tif$", full.names = TRUE)
+  length(dem_files) # To check there is the right amount of tiles (143)
+
+# Creating a mosaic of tiles
+  dem_vrt <- vrt(dem_files)
+  dem_vrt # EPSG:32632 (WGS 84 / UTM zone 32N, meters)
+  plot(dem_vrt) # Looks complete
+
+# Re-projecting to EPSG:3035
+  dem_10m_3035 <- project(dem_vrt, template_10m, method = "bilinear",
+    filename = "/Volumes/Storage/raw_italy_data/dem_10m_3035.tif", overwrite = TRUE)
+  crs(dem_10m_3035) # EPSG:3035
+  res(dem_10m_3035) # 10m
+  dem_10m_3035 <- rast("/Volumes/Storage/raw_italy_data/dem_10m_3035.tif")
+
+# Limiting to continental Italy
+  dem_10m_it <- mask(dem_10m_3035, italy_cont,
+    filename = "/Volumes/Storage/raw_italy_data/dem_10m_it.tif", overwrite = TRUE)
+  plot(dem_10m_it) # Looks good
+  dem_10m_it <- rast("/Volumes/Storage/raw_italy_data/dem_10m_it.tif")
+
+# Creating an elevation raster (50m)
+  elevation_50m <- aggregate(dem_10m_it, fact = 5, fun = mean, na.rm = TRUE)
+
+# Checking that the data looks good (specifically if the grid aligns with template)
+  compareGeom(elevation_50m, template, stopOnError = FALSE) # TRUE = good
+  origin(elevation_50m); origin(template) # match = good 
+    # If things are not good, remove crop() previously, should not be there as it alters the map and the aggregate function)
+  plot(elevation_50m, main = "elevation 50m") # good
+  crs(elevation_50m) # good
+  res(elevation_50m) # good
+  min(elevation_50m) # 4729.661133 to 4729.661133m
+
+# Creating a slope raster
+  slope_10m <- terrain(dem_10m_it, v = "slope", unit = "degrees")
+  slope_50m <- aggregate(slope_10m, fact = 5, fun = mean, na.rm = TRUE)
+  min(slope_10m) # 0 to 89.606529 degrees
+  min(slope_50m) # 0 to 89.37149 degrees
+
+# Creating a eastness raster 
+  aspect <- terrain(dem_10m_it, v = "aspect", unit = "degrees")
+  eastness_10m <- sin(aspect * pi / 180)
+  min(eastness_10m) # -1 to 1
+  eastness_50m <- aggregate(eastness_10m, fact = 5, fun = mean, na.rm = TRUE)
+  min(eastness_50m) # -1 to 1
+  
+  # Checking that eastness at 50m looks okay
+  compareGeom(eastness_50m, template, stopOnError = FALSE) # TRUE = good
+  origin(eastness_50m); origin(template) # match = good
+  global(eastness_50m, c("min", "max"), na.rm = TRUE) # -1 to 1 = good
+  plot(eastness_50m, main = "Eastness 50m") # Looks good
+
+# Saving as processed data
+  terra::writeRaster(elevation_50m, 
+    filename = "/Volumes/Storage/data_processed/elevation_50m.tif", 
+    overwrite = TRUE)
+
+  terra::writeRaster(slope_10m, 
+    filename = "/Volumes/Storage/data_processed/slope_10m.tif", 
+    overwrite = TRUE)
+
+  terra::writeRaster(slope_50m, 
+    filename = "/Volumes/Storage/data_processed/slope_50m.tif", 
+    overwrite = TRUE)
+
+  terra::writeRaster(eastness_50m, 
+    filename = "/Volumes/Storage/data_processed/eastness_50m.tif", 
+    overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+
+######################################################
+### Preparing covariates related to landcover type ###
+######################################################
+
+# Covariates:
+# Landcover type -> Guimarães et al., 2025
+  # Deciduous forest (1) 
+  # Coniferous forest (2)
+  # Mixed forest (3)
+  # Shrubland (4) (transition to shrubland)
+  # Meadows (5)
+  # Agriculture (6) 
+# Open : Proportion of occupation by open areas, permanent pastures, agriculture -> Rio-Maior et al., 2019
+
+# Source:
+  # European Environment Agency. (2019). CORINE Land Cover 2018 (raster 100 m), 
+    # Europe, 6-yearly—Version 2020_20u1, May 2020 (Version 20.01) [GeoTIFF]. 
+    # European Environment Agency. https://doi.org/10.2909/960998C1-1870-4E82-8051-6485205EBBAC
+    
+    # Deciduous forest: CORINE 311 (raster values : 23; level 1)
+    # Coniferous forest: CORINE 312 (raster values : 24; level 2)
+    # Mixed forest: CORINE 313 (raster values : 25; level 3)
+      # Note: The original study reported CORINE class 313 as deciduous forest and 
+      # class 311 as mixed forest. However, according to the official CORINE Land Cover 
+      # legend, class 311 corresponds to broad-leaved forest and class 313 to mixed forest. 
+      # Therefore, the classes were assigned based on the official legend rather than 
+      # the labels reported in the original article. 
+    # Shrubland: CORINE 221, 222, 322, 324 (raster values : 15, 16, 27, 29; level 4)
+    # Meadows: CORINE 231, 242, 243, 321, 333 (raster values : 18, 20, 21, 26, 32; level 5)
+    # Agriculture: CORINE 211, 241 (raster values : 12, 19; level 6)
+  # Open: CORINE 321, 231, 211, 241, 212 (raster values : 26, 18, 12, 13, 19)
+
+# Calling the raw data 
+  landcover <- rast("/Volumes/Storage/raw_data/landcover.tif")
+  global(landcover,c("min","max"), na.rm=TRUE) # raster values from 1 to 44
+  plot(landcover)
+  crs(landcover) # EPSG:3035
+  res(landcover) # 100 m
+
+# Limiting the map to continental Italy
+  landcover_it <- mask(crop(landcover, italy_cont), italy_cont)  
+    # using crop then mask reduces the processing work
+
+# 6-level landcover type covariate:
+
+  # Reclassifying the CORINE levels to the study levels
+    reclass_landcover <- matrix(c(
+      # Deciduous forest (level 1)
+      23, 1, # 311 Broad-leaved forest
+      # Coniferous forest (level 2)
+      24, 2, # 312 Coniferous forest
+      # Mixed forest (level 3)
+      25, 3, # 313 Mixed forest
+      # Shrubland (level 4)
+      15, 4, # 221 Vineyards
+      16, 4, # 222 Fruit trees and berry plantations
+      27, 4, # 322 Moors and heathland
+      29, 4, # 324 Transitional woodland-shrub
+      # Meadows (level 5)
+      18, 5, # 231 Pastures
+      20, 5, # 242 Complex cultivation patterns
+      21, 5, # 243 Land principally occupied by agriculture with significant areas of natural 
+      26, 5, # 321 Natural grasslands
+      32, 5, # 333 Sparsely vegetated areas
+      # Agriculture (level 6)
+      12, 6, # 211 Non-irrigated arable land
+      19, 6  # 241 Annual crops associated with permanent crops
+      ), ncol = 2, byrow = TRUE)
+  
+  # Creating a landcover raster with the 6 levels
+    landcover_it_6 <- classify(landcover_it, rcl = reclass_landcover, others = 7)
+    landcover_it_6 <- mask(landcover_it_6, italy_cont)
+      # Used to be others = NA, but it create big holes where there is urban areas, bare rock, wetlands, and so on
+  
+  # Checking that all is good
+    plot(landcover_it_6) # Looks good, not too much blank space
+    freq(landcover_it_6) # looks good too, all 7 levels are present, no NAs
+      # Class 7 is 15844942 cells (total is 100704974), which represents 15,73%
+      class_7 <- freq(landcover)[freq(landcover)$value == 7, "count"] 
+      class_7 # 49697 cells
+      class_7 * 2500 / 1e6 # 124.2425 km2
+    
+  # Aligning the covariate to template (50m)
+    landcover_it_6 <- resample(landcover_it_6, template, method = "near")
+    print(landcover_it_6) # looks good EPSG:3035, 49.99941m by 50.00001m
+    freq(landcover_it_6)  # classes 1-7
+  
+  # Saving as processed data
+    terra::writeRaster(landcover_it_6, 
+      filename = "/Volumes/Storage/data_processed/landcover_it_6.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+# Open covariate:
+
+  # Note: I use the 100m used buffer from the original study to calculate the proportion 
+    # between the open (1) and not open (0) cells within a 100m radius of the focal point of each cell.
+  
+  # Reclassifying the CORINE levels to the study level (1)
+    open_classes <- matrix(c(
+      12, 1, # 211 Non-irrigated arable land
+      13, 1, # 212 Permanently irrigated land
+      14, 1, # 213 - Rice fields
+      15, 1, # 221 - Vineyards
+      16, 1, # 222 - Fruit trees and berry plantations
+      17, 1, # 223 - Olive groves
+      18, 1, # 231 Pastures
+      19, 1, # 241 Annual crops associated with permanent crops
+      20, 1, # 242 - Complex cultivation patterns
+      21, 1, # 243 - Land principally occupied by agriculture with significant areas of natural vegetation
+      22, 1, # 244 - Agro-forestry areas
+      30, 1, # 331 - Beaches - dunes - sands
+      31, 1, # 332 - Bare rocks
+      33, 1 # 334 - Burnt area
+        ), ncol = 2, byrow = TRUE)
+  
+  # Creating an open raster with the desired corine classes
+    open <- classify(landcover_it, rcl = open_classes, others = NA)
+    plot(open) # Looks good
+    freq(open) # Looks good (only 1 and NA which freq() doesn't show, no 0 values)
+  
+  # Changing NA values to 0 (to calculate a proportion)
+    open[is.na(open)] <- 0
+  
+  # Resampling the cells to a 50m resolution (from the 100m original resolution)
+    open_50 <- resample(open, template, )
+      # Choosing the near method as 0 and 1 are categorical values
+  
+  # Changing 0 values outside italy_cont to NA values
+    open_50 <- mask(open_50, italy_cont)
+  
+  # Checking that all is okay
+    freq(open_50) # Looks good, only 1 and 0 values (and NAs)
+    plot(open_50) # Looks good
+  
+  # Calculating the proportion of 1/0 in 100m radius of each focal point of each cell
+    window_100m <- focalMat(open_50, 100, type = "circle")   # 100 m round window
+      # This takes cells which center is in the 100m radius and weighs them equally (1/n_cell) 
+      # Each cell within the radius is worth the same for the proportion
+    window_100m[window_100m > 0]  <- 1 # This take the cells and weighs them as 1 rather than 1/n_cell
+    window_100m[window_100m == 0] <- NA # This excludes, through NA, cells that should weigh nothing rather than keeping them at 0
+      # Important as edge cells, like the ocean, won't be counted as 0 in the mean and altering the result
+      # If there are 10 cells in a radius, and 4 are oceans, the mean will only evaluate 6 cells rather than the whole 10 cells
+      # It is basically a circular shape of cells that all have the value 1 (previously held the value 1/n_cells)
+    open_prop <- focal(open_50, w = window_100m, fun = "mean", na.rm = TRUE)
+      # This takes the open cells (valued at 0 or 1) and multiplies them by 1, then takes the result and makes a mean
+      # So 0*1 = 0 and 1*1=1
+  
+  # Checking that the result looks okay
+    plot(open_prop, main = "Proportion of Open Areas") # Beautiful, scale from 0 to 1
+    res(open_prop) # 50m
+  
+  # Saving as processed data
+    terra::writeRaster(open_prop, 
+      filename = "/Volumes/Storage/data_processed/open.tif", overwrite = TRUE)
+      # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+##############################################
+### Preparing tree cover density covariate ###
+##############################################
+
+# Covariate:  
+  # Tree cover density (%) -> Guimarães et al., 2025
+  
+# Source:
+  # European Environment Agency. (2018). Tree Cover Density 2015 (raster 20 m), 
+    # Europe, 3-yearly, Mar. 2018 (Version 05.00) [GeoTIFF]. European Environment 
+    # Agency. https://doi.org/10.2909/8BFBDA74-7B62-4659-96DD-86600EA425A2
+  
+# NOTE: substituted for TCD 2018-present (10 m) due to CLMS processing delay
+  # on the original order (as of [date]). 2015 is the closest available
+  # epoch; tree cover density is not expected to change drastically over
+  # a 3-4 year gap outside of major fire/logging events.
+  # Tiles used: E40N20 (northern/central Italy) + E40N10 (southern Italy) + E50N10
+  
+# Calling the raw data
+  tree_cover_N20 <- rast("/Volumes/Storage/raw_data/tree_E40N20.tif")
+  tree_cover_N10 <- rast("/Volumes/Storage/raw_data/tree_E40N10.tif")
+  tree_cover_E50 <- rast("/Volumes/Storage/raw_data/tree_E50N10.tif")
+  crs(tree_cover_N20) # EPSG:3035
+  crs(tree_cover_N10) # EPSG:3035
+  crs(tree_cover_E50) # EPSG:3035
+  
+# Merge all 3 tiles into one raster
+  tree_cover <- merge(tree_cover_N20, tree_cover_N10, tree_cover_E50)
+  global(tree_cover, c("min","max"), na.rm=TRUE) # raster values from 0 to 100
+  
+# Limiting to continental Italy
+  tree_cover_it <- mask(crop(tree_cover, italy_cont), italy_cont) 
+  plot(tree_cover_it, main = "Tree cover density 10m") # There is no scale and the colour is green and white, which is wrong
+  
+# Remove the embedded colour table so plot() treats values as continuous
+  coltab(tree_cover_it) <- NULL
+  plot(tree_cover_it, main = "Tree cover density 10m") # scale present, normal colours, looks good
+  
+# Aligning to the 50m template grid
+  tree_cover_50m <- resample(tree_cover_it, template, method = "bilinear")
+  plot(tree_cover_50m, main = "Tree cover density 50m")
+  print(tree_cover_50m) # 0 to 100, EPSG:3035, 50m
+  
+# Saving raster as processed data
+  terra::writeRaster(tree_cover_50m, 
+    filename = "/Volumes/Storage/data_processed/tree_cover_50m.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+############################################
+### Preparing Night-Time light covariate ###
+############################################ 
+
+# Covariate : 
+  # Night-Time light (nW/cm2/sr) -> Guimarães et al., 2025
+
+# Source : 
+  # Elvidge, C. D., Baugh, K., Zhizhin, M., Hsu, F. C., & Ghosh, T. (2017). VIIRS 
+    # night-time lights. International Journal of Remote Sensing, 38(21), 5860–5879. 
+    # https://doi.org/10.1080/01431161.2017.1342050
+  # Tile's file name: SVDNB_npp_20170601-20170630_75N060W_vcmslcfg_v10_c201707021700.tgz
+    # (this tile includes the whole of Italy as it starts at 75°N, 60°E)
+
+# Calling the raw-data of night light
+  night_light <- rast("/Volumes/Storage/raw_data/night_light.tif")
+  plot(night_light, main = "Night-time light") # Looks one colour uniformely... not good
+
+  global(night_light,c("min","max", "mean"), na.rm=TRUE) 
+    # raster values from -1.5 to 118056 with a mean of 0.3827247
+
+# Removing negative values (null cells)
+  night_light[night_light < 0] <- NA
+
+# Re-projecting to EPSG:3035 while also aligning to template 50m
+  crs(night_light) # EPSG:4326
+  night_light_3035 <- project(night_light, template, method = "bilinear")
+    # Bilinear is better for continuous variables (averages the 4 nearest pixels and weighs them by distance)
+  crs(night_light_3035) # EPSG:3035
+  res(night_light_3035) # 50m
+  plot(night_light_3035) # Can't see much
+
+# Limiting to continental Italy
+  night_light_it <- mask(crop(night_light_3035, italy_cont), italy_cont)  
+    # using crop then mask reduces the processing work
+
+# Checking that all is good
+  plot(night_light_it, main = "Night-time light emissions") # Some spots where big cities
+
+# Saving raster as processed data
+  terra::writeRaster(night_light_it, 
+    filename = "/Volumes/Storage/data_processed/night_light_it.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+###############################################
+### Preparing snow cover duration covariate ###
+############################################### 
+
+# Covariate: 
+  # Snow cover duration (days)
+
+# Source : 
+  # Brun, P., Zimmermann, N. E., Hari, C., Pellissier, L., & Karger, D. N. (2022). 
+    # Global climate-related predictors at kilometer resolution for the past and 
+    # future. Earth System Science Data, 14(12), 5573–5603. 
+    # https://doi.org/10.5194/essd-14-5573-2022
+  # Resolution: 1km
+
+# Calling the raw data of snow
+  snow <- rast("/Volumes/Storage/raw_data/snow.tif")
+  global(snow,c("min","max", "mean"), na.rm=TRUE) # 0 to 365, mean of 126.4672
+  crs(snow) #EPSG:4326
+
+# Limiting to continental Italy (in EPSG:4326 projection)
+  snow_it <- mask(crop(snow, italy_cont_4326), italy_cont_4326)  
+  plot(snow_it, main = "EPSG:4326") # Beautiful :)
+    # using crop then mask reduces the processing work
+
+# Re-projecting to EPSG:3035 and also aligning to template (50m)
+  snow_3035 <- project(snow_it, template, method = "bilinear")
+
+# Checking that all is good
+  plot(snow_3035, main = "Snow cover duration 50m") # Looks good!
+  res(snow_3035) # 50m
+
+# Saving raster as processed data
+  terra::writeRaster(snow_3035, 
+    filename = "/Volumes/Storage/data_processed/snow_3035.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+#################################
+### Preparing roads covariate ###
+################################# 
+
+# Covariate
+  # Roads : Proportion of occupation by paved roads (50m) -> m/m2
+
+# Source:
+  # Meijer, Huijbregts, Schotten, & Schipper. (2018). Global patterns of current 
+    # and future road infrastructure—Supplementary spatial data (Version Version 
+    # 4 - 2018) [Data set]. Zenodo. https://doi.org/10.5281/ZENODO.6420960
+
+# Note: from previous attempts, the dataset is huge and is very hard to process.
+
+# Creating a rectangle shape including Italy
+  italy_box <- ext(italy_cont_4326)
+  # The dataset of roads is much too big for R to process so I will call the 
+  # data of only this box and paved roads
+
+# Calling the raw data of roads
+  roads_paved_it <- vect("/Volumes/Storage/raw_data/roads.shp",
+    query = "SELECT * FROM roads WHERE GP_RSE = 1", extent = italy_box)
+    # This calls only the bounding box of Italy and paved roads
+    # Helps reduce the processing demand
+
+# Checking the data
+  nrow(roads_paved_it) # 714550
+  table(roads_paved_it$GP_RSE)  # 714550 values for 1
+  plot(roads_paved_it) # Took time to run, but looks good
+
+# Limiting to continental Italy
+  roads_it <- mask(crop(roads_paved_it, italy_cont_4326), italy_cont_4326)
+
+# Saving as raw Italy data to call if R crashes
+  terra::writeVector(roads_paved_it, 
+    "/Volumes/Storage/raw_italy_data/roads_paved_it_bbox.gpkg", overwrite = TRUE)
+
+  terra::writeVector(roads_it, 
+    "/Volumes/Storage/raw_italy_data/roads_it.gpkg", overwrite = TRUE)
+
+# Re-projecting to EPSG:3035
+  roads_it_3035 <- project(roads_it, "EPSG:3035")
+
+# Saving as raw Italy data to call if R crashes
+  terra::writeVector(roads_it_3035,
+    filename = "/Volumes/Storage/raw_italy_data/roads_it_3035.gpkg", overwrite = TRUE)
+
+# Rasterizing the total polyline length per cell
+  roads_length_r  <- rasterizeGeom(roads_it_3035,  template, fun = "length")
+
+# Setting NAs to zero
+  roads_length_r  <- subst(roads_length_r,  NA, 0)
+
+# Limiting again to continental Italy (subst will fill the sea cells)  
+  roads_length_r  <- mask(crop(roads_length_r,  italy_cont), italy_cont)
+
+# Converting lengths to proportions (m/m2) (50m cell is 2500m2)
+  roads_prop_r <- roads_length_r / 2500
+  
+# Checking that the data looks good
+  global(roads_prop_r, c("min", "max", "mean"), na.rm = TRUE) # 0 to 0.1873661, mean of 0.0008965645
+  plot(roads_prop_r,  main = "Roads proportion") # Looks good
+
+# Saving raster as processed data
+  terra::writeRaster(roads_prop_r, 
+    filename = "/Volumes/Storage/data_processed/roads_it.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+##################################
+### Preparing trails covariate ###
+##################################  
+
+# Covariate
+  # trails : Proportion of occupation by unpaved roads and pedestrian trails (50m)
+
+# Source:
+  # OpenStreetMap contributors. (2017). OpenStreetMap: Italy [Map]. 
+    # https://download.geofabrik.de/europe/italy.html
+  # Tags to consider: 
+    # Highway -> highway=track; highway=footway; highway=path;
+    # Surface -> surface=ground; surface=unpaved; surface=gravel; surface=grass; 
+      # surface=compacted; surface=dirt; surface=fine_gravel; surface=pebblestone; 
+      # surface=earth; surface=sand
+    # Tracktype -> tracktype=grade2; tracktype=grade3; tracktype=grade4; tracktype=grade5
+
+# Calling the raw data
+  trails <- oe_read("/Volumes/Storage/raw_data/trails.osm.pbf", layer = "lines",
+    extra_tags = c("surface", "tracktype")) # Highway is automatically called
+  st_crs(trails) #EPSG:4326
+  head(trails) # Interesting
+
+# Keeping only the desired tags
+  surface_types <- c("ground","unpaved","gravel","grass","compacted","dirt", 
+    "fine_gravel","pebblestone","earth","sand")
+  highway_types <- c("living_street", "unclassified","residential","service", 
+    "road", "tertiary", "secondary", "primary", "pedestrian", "cycleway")
+    # Types of highway that the surface type has to be specified
+  
+  filter_trail <- with(trails,
+    highway %in% c("path","footway", "bridleway", "track") |
+    (highway %in% highway_types & surface %in% surface_types) |
+    tracktype %in% c("grade2","grade3","grade4","grade5") )
+  
+  trails_filtered <- trails[filter_trail, ]
+
+# Changing trails from a SimpleFeature (sf) to a SpatVector to use terra functions
+  trails_v <- vect(trails_filtered)
+
+# Limiting to continental Italy
+  trails_it <- crop(trails_v, italy_cont_4326)
+  # using crop then mask reduces the processing work
+
+# Re-projecting to EPSG:3035
+  trails_it_3035 <- project(trails_it, "EPSG:3035")
+
+# Saving as raw Italy data
+  terra::writeVector(trails_it_3035,
+    filename = "/Volumes/Storage/raw_italy_data/trails_it_3035.gpkg", overwrite = TRUE)
+
+# Rasterizing the total polyline length per cell
+  trails_length_r  <- rasterizeGeom(trails_it_3035, template, fun = "length")
+
+# Setting NAs to zero
+  freq(is.na(trails_length_r)) # There are no NA values
+  trails_length_r  <- subst(trails_length_r,  NA, 0) # Run if there are NAs
+
+# Limiting again to continental Italy (subst will fill the sea cells)  
+  trails_length_r  <- mask(crop(trails_length_r,  italy_cont), italy_cont)
+
+# Converting lengths to proportions (m/m2) (50m cell is 2500m2)
+  trails_prop_r <- trails_length_r / 2500
+  global(trails_prop_r, c("min", "max", "mean"), na.rm = TRUE) # 0 0.266569 0.001434407
+# Checking that all is good
+  plot(trails_prop_r) # Looks good :)
+  crs(trails_prop_r) # EPSG:3035
+  res(trails_prop_r) # 50m
+
+# Saving raster as processed data
+  terra::writeRaster(trails_prop_r, 
+    filename = "/Volumes/Storage/data_processed/trails_it.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+#######################################
+### Preparing settlements covariate ###
+#######################################  
+
+# Covariate
+  # Settlements: Proportion of occupation by human settlements (50m)
+
+# Source:
+  # European Environment Agency. (2020). Impervious Built-up 2018 (raster 10 m), 
+    # Europe, 3-yearly, Aug. 2020 (Version 01.00) [GeoTIFF]. European Environment 
+    # Agency. https://doi.org/10.2909/3E412DEF-A4E6-4413-98BB-42B571AFD15E
+  # Data is made of many files -> mosaic style
+
+# Calling the raw data (all the tif files)
+  tif_files <- list.files("/Volumes/Storage/raw_data/sett", pattern = "\\.tif$", full.names = TRUE)
+  length(tif_files) # 74 files
+
+# Creating a virtual raster dataset (VRT) 
+  sett <- vrt(tif_files, "/Volumes/Storage/raw_data/sett/sett_full.vrt", overwrite = TRUE)
+
+# Checking the data
+  minmax(sett) # 0 to 255
+  plot(sett) # Looks interesting, there are some yellow dots and the ocean is blocky black
+  crs(sett) # EPSG 3035 = good
+  freq(sett) # Only 0, 1, and 255 occur
+  # Based on the "IBU_2018_010m_QGISColour.txt" file accompanying the dataset:
+  # 0 = non-built-up
+  # 1 = built-up
+  # 254 = un-classifiable
+  # 255 = outside the area
+  # 2 - 253 = filler
+
+# Changing outside areas to NAs
+  sett_0_1 <- classify(sett, cbind(255, NA)) 
+  freq(sett_0_1) # Only 1 and 0 now
+
+# Resampling the 10m data to fit the 10m template grid
+  sett_10m <- resample(sett_0_1, template_10m, method = "near",
+    filename = "/Volumes/Storage/raw_italy_data/sett_10m.tif", overwrite = TRUE)
+    # Method "near" as it<s categorical data (0 or 1)
+
+# Limiting to continental Italy
+  sett_it_10m <- mask(sett_10m, italy_cont)  
+  # Not crop as it would later misalign the 10m template-aligned cells to template
+
+# Checking that all is good
+  plot(sett_it_10m) # Looks good (0 and 1 only)
+
+# Using the 10m cells as subraster of 50m cells to calculate proportion of occupation 
+  # 5 x 5 10m cells sub raster, aggregated to 50m cells with proportion of 1 vs NA
+  res(sett_it_10m) # 10m
+  sett_prop <- aggregate(sett_it_10m, fact = 5, fun = mean, na.rm = TRUE)
+    # na.rm = TRUE to avoid considering in the mean the NA cells of the ocean and other
+
+# Checking that the grid still aligns to template
+  compareGeom(sett_prop, template, stopOnError = FALSE) # TRUE = good
+  global(sett_prop, c("min", "max"), na.rm = TRUE) # between 0 and 1 = good
+  plot(sett_prop) # Looks good, scale from 0 to 1
+
+# Saving as processed data
+  terra::writeRaster(sett_prop, 
+    filename = "/Volumes/Storage/data_processed/sett_50m.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+
+#####################################
+### Preparing livestock covariate ###
+#####################################  
+
+# Covariate
+  # Livestock : Average livestock density [LU]/km2
+    # 1 LU of cattle and horses for 0.150 LU of sheep and goats
+    # Livestock Units[LU]/km2
+
+# Source:
+  # Du, Z., Yu, L., Zhao, Y., Li, X., Liu, X., Li, X., Hao, P., Chen, Z., Guo, Z., 
+    # You, L., Ma, X., & Wang, H. (2025). Annual global grided livestock mapping 
+    # from 1961 to 2021 [Data set]. Zenodo. https://doi.org/10.5281/ZENODO.11545700
+  # Specifically: 2017 maps of cattle, horse, sheep and goat densities
+
+# Calling the raw data and checking the info
+  cattle <- rast("/Volumes/Storage/raw_data/cattle.tif")
+  crs(cattle) # EPSG:4326
+  res(cattle) # 0.04491576 degrees
+  global(cattle,c("min","max", "mean"), na.rm=TRUE) # From 0.001960939 to 1923.719, mean of 12.30553
+  
+  horse <- rast("/Volumes/Storage/raw_data/horse.tif")
+  crs(horse) # EPSG:4326
+  res(horse) # 0.04491576 degrees
+  global(horse,c("min","max", "mean"), na.rm=TRUE) # From 0.001960799 to 2369.398, mean of 0.615297
+  
+  sheep <- rast("/Volumes/Storage/raw_data/sheep.tif")
+  crs(sheep) # EPSG:4326
+  res(sheep) #
+  global(sheep,c("min","max", "mean"), na.rm=TRUE) # From 0.001960785 to 14429.39, mean of 11.90807
+  
+  goats <- rast("/Volumes/Storage/raw_data/goats.tif")
+  crs(goats) # EPSG:4326
+  res(goats) # 0.04491576 degrees
+  global(goats,c("min","max", "mean"), na.rm=TRUE) # From 0.001960811 to 4083.325, mean of 10.36142
+
+# Limiting to continental Italy
+  cattle_it <- mask(crop(cattle, italy_cont_4326), italy_cont_4326)  
+  horse_it <- mask(crop(horse, italy_cont_4326), italy_cont_4326)
+  sheep_it <- mask(crop(sheep, italy_cont_4326), italy_cont_4326)
+  goat_it <- mask(crop(goats, italy_cont_4326), italy_cont_4326)
+    # Using crop then mask reduces the processing work
+
+# Merging the livestock together at 1LU for cattle and horse and 0.15 LU for sheep and goats 
+  livestock <- cattle_it + horse_it + 0.15 * (sheep_it + goat_it)
+
+# Checking that all is good
+  global(livestock, c("min","max", "mean"), na.rm=TRUE) # From 0.3684018 to 317.2875, mean of 24.48439
+  plot(livestock) # Looks good
+
+# Resampling to 50m and re-projecting to EPSG:3035
+  livestock_50m <- project(livestock, template, method = "bilinear")
+    # Template is EPSG:3035 and has a the exact 50m resolution wanted
+  livestock_50m <- mask(livestock_50m, italy_cont)
+
+# Checking that the grids align and that all is good
+  compareGeom(livestock_50m, template, stopOnError = FALSE) # TRUE = good
+  plot(livestock_50m) # Looks god
+  global(livestock_50m, c("min","max", "mean"), na.rm=TRUE) # From 0.3703571 to 316.745, mean of 24.16931
+  res(livestock_50m) # 50m
+  crs(livestock_50m) # EPSG:3035
+
+# Save raster as processed data
+  terra::writeRaster(livestock_50m, 
+    filename = "/Volumes/Storage/data_processed/livestock_it.tif", overwrite = TRUE)
+    # "overwrite = TRUE" allows R to replace any file with the same existing name
+
+################################################################
+###  Checking that all 9 Rio-Maior et al., 2019 covariates align togehter ###
+################################################################
+
+rio_data <- c(
+  roads       = "/Volumes/Storage/data_processed/roads_it.tif",
+  trails      = "/Volumes/Storage/data_processed/trails_it.tif",
+  settlements = "/Volumes/Storage/data_processed/sett_50m.tif",
+  livestock   = "/Volumes/Storage/data_processed/livestock_it.tif",
+  elevation   = "/Volumes/Storage/data_processed/elevation_50m.tif",
+  slope       = "/Volumes/Storage/data_processed/slope_50m.tif",
+  open        = "/Volumes/Storage/data_processed/open.tif",
+  rivers      = "/Volumes/Storage/data_processed/rivers_50m.tif",
+  streams     = "/Volumes/Storage/data_processed/streams_50m.tif")
+
+for (x in names(rio_data)) {
+  r <- rast(rio_data[[x]])
+  cat(sprintf("%-12s geom_ok=%-5s origin=(%.1f, %.1f) res=%.1f\n",
+              x, compareGeom(r, template, stopOnError = FALSE), 
+              origin(r)[1], origin(r)[2], res(r)[1]))}
+
+# All lines says geom_ok=TRUE, the covariate all align well :) 
+  
+################################################################
+###  Checking that all 7 Guimarães covariates align together ###
+################################################################
+  
+gui_data <- c(
+  slope = "/Volumes/Storage/data_processed/slope_50m.tif",
+  eastness = "/Volumes/Storage/data_processed/eastness_50m.tif",
+  water = "/Volumes/Storage/data_processed/dist_water_source_r.tif",
+  tree = "/Volumes/Storage/data_processed/tree_cover_50m.tif",
+  snow = "/Volumes/Storage/data_processed/snow_3035.tif",
+  landcover = "/Volumes/Storage/data_processed/landcover_it_6.tif",
+  light = "/Volumes/Storage/data_processed/night_light_it.tif")
+  
+for (x in names(gui_data)) {
+    r <- rast(gui_data[[x]])
+    cat(sprintf("%-12s geom_ok=%-5s origin=(%.1f, %.1f) res=%.1f\n",
+                x, compareGeom(r, template, stopOnError = FALSE), 
+                origin(r)[1], origin(r)[2], res(r)[1]))}
+
+  # All lines says geom_ok=TRUE, the covariate all align well :) 
+  
+###############################################
+### Information for tables (min, amx, mean) ###
+###############################################
+  
+  slope <- rast("/Volumes/Storage/data_processed/slope_50m.tif")
+  eastness <- rast("/Volumes/Storage/data_processed/eastness_50m.tif")
+  water <- rast("/Volumes/Storage/data_processed/dist_water_source_r.tif")
+  tree <- rast("/Volumes/Storage/data_processed/tree_cover_50m.tif")
+  snow <- rast("/Volumes/Storage/data_processed/snow_3035.tif")
+  landcover <- rast("/Volumes/Storage/data_processed/landcover_it_6.tif")
+  light <- rast("/Volumes/Storage/data_processed/night_light_it.tif")
+  roads <- rast("/Volumes/Storage/data_processed/roads_it.tif")
+  trails <- rast("/Volumes/Storage/data_processed/trails_it.tif")
+  settlement <- rast("/Volumes/Storage/data_processed/sett_50m.tif")
+  livestock <- rast("/Volumes/Storage/data_processed/livestock_it.tif")
+  elevation <- rast("/Volumes/Storage/data_processed/elevation_50m.tif")
+  open <- rast("/Volumes/Storage/data_processed/open.tif")
+  rivers <- rast("/Volumes/Storage/data_processed/rivers_50m.tif")
+  streams <- rast("/Volumes/Storage/data_processed/streams_50m.tif")
+  
+# Results are in order of : min, max, mean
+  global(slope, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 89.37149 13.06972 12.69754
+  global(eastness, c("min","max", "mean", "sd"), na.rm=TRUE) # -1   1 0.03890954 0.6671833
+  global(water, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 12925.19 1164.982 868.1363
+  global(tree, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 100 35.3568 37.26658
+  global(snow, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 365 33.98649 77.9599
+  freq(landcover)
+    # 1 20574826
+    # 2  4712436
+    # 3  3704416
+    # 4  7350296
+    # 5 22226728
+    # 6 26764372
+    # 7 14962656
+  global(light, c("min","max", "mean", "sd"), na.rm=TRUE) # 4.635493e-05 448.904 3.26001 7.597955
+  global(roads, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.1731689 0.0009174858 0.004514923
+  global(trails, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.2502393 0.001452338 0.005446585
+  global(settlement, c("min","max", "mean", "sd"), na.rm=TRUE) # 0   1 0.02610497 0.1240107
+  global(livestock, c("min","max", "mean", "sd"), na.rm=TRUE) # 0.371103 316.1162 24.58622 32.20497
+  global(elevation, c("min","max", "mean", "sd"), na.rm=TRUE) # -38.86007 4729.661 566.813 622.473
+  global(open, c("min","max", "mean", "sd"), na.rm=TRUE) # 0   1 0.5281006 0.4623533
+  global(rivers, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.04853503 6.139596e-05 0.001086224
+  global(streams, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.05007223 0.0002063524 0.001985559
+  
+ # Individual plots (not necessary, but there if needed)
+    # Some require some tweeking for titles and so on
+  plot(slope, main = "Slope (°)")
+  plot(eastness, main = "Eastness (°)")
+  plot(water, main = "Distance to water (m)")
+  plot(tree, main = "Tree cover density (%)")
+  plot(snow, main = "Snow cover duration (days)")
+  plot(landcover, main = "Landcover type (6 levels)")
+  plot(light, main = expression("Night-time light (nW/cm"^2*"/sr)"))
+  plot(roads, main = expression("Proportion of occupation", "by paved roads (m/m"^2*")"))
+  plot(trails, main = expression("Proportion of occupation by unpaved roads and pedestrian trails (m/m"^2*")"))
+  plot(settlement, main = "Proportion of occupation by human settlements")
+  plot(livestock, main = expression("Average livestock density ([LU]/km"^2*")"))
+  plot(elevation, main = "Average elevation above sea level (m)")
+  plot(open, main = "Proportion of occupation by open areas, permanent pastures, agriculture")
+  plot(rivers, main = expression("Proportion of occupation by 1st and 2nd order waterlines (m/m"^2*")"))
+  plot(streams, main = expression("Proportion of occupation by 3rd, 4th and 5th order waterlines (m/m"^2*")"))
+
+# Saving as a pdf pannel of the covariates
+  rio <- c(roads, trails, settlement, livestock, elevation, slope, open, rivers, streams)
+    names(rio) <- c("Roads", "Trails", "Settlements", "Livestock", "Elevation",
+    "Slope", "Open", "Rivers", "Streams")
+    pdf("/Volumes/Storage/figures/covariates_riomaior.pdf", width = 6.3, height = 6.3)
+    par(mfrow = c(3, 3))
+    for (i in 1:nlyr(rio)) plot(rio[[i]], main = "", mar = c(2, 2, 2, 5))
+    dev.off()
+  
+  pdf("/Volumes/Storage/figures/covariates_guimaraes.pdf", width = 6.3, height = 6.3)
+    par(mfrow = c(3, 3))
+    plot(slope,     main = "", mar = c(2, 2, 2, 5))
+    plot(eastness,  main = "", mar = c(2, 2, 2, 5))
+    plot(water,     main = "", mar = c(2, 2, 2, 5))
+    plot(tree,      main = "", mar = c(2, 2, 2, 5))
+    plot(snow,      main = "", mar = c(2, 2, 2, 5))
+    plot(landcover, main = "", mar = c(2, 2, 2, 5), type = "classes")
+    plot(light,     main = "", mar = c(2, 2, 2, 5))
+    dev.off()
+
+#############################
+### END OF COVARIATE HUNT ###
+###    congratulations!   ###
+#############################
