@@ -1,0 +1,473 @@
+# Updated: 26-08-2026
+
+##################################################################
+######################### MODEL PORTUGAL #########################
+##################################################################
+
+# Rio-Maior et al. 2019
+
+# Model : mixed-effects conditional logistic regression (Point Selection Function)
+# Taking the coefficients of the already built model and APPLYING them 
+  # to the continental italian covariates to ultimately create a resistance map
+
+# Conceptual steps : 
+  # Transforming the covariates as in the article
+  # Standardizing covariates (z-score) = all covariates comparable and unitless
+  # Weighing and summing covariates (sum of covariate * coefficient)
+  # Applying the logistic regression
+    # to change into a conductance map from the probability of movement: p = 1 / (1 + exp (-n)
+  # Changing into a Resistance map (1 / p)
+  # Output (maps)
+
+#####################
+### Startup lines ###
+#####################
+
+  library(terra)
+  dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
+  terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
+  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
+  template <- rast(ext(italy_cont), resolution = 50, crs = crs(italy_cont))
+
+##################################################
+### Calling the covariates and organizing them ###
+##################################################
+
+# All are 50m resolution, aligned to the same grid, masked to continental Italy, EPSG:3035
+
+  roads <- rast("/Volumes/Storage/data_processed/roads_it.tif")
+  trails <- rast("/Volumes/Storage/data_processed/trails_it.tif")
+  settlement <- rast("/Volumes/Storage/data_processed/sett_50m.tif")
+  livestock <- rast("/Volumes/Storage/data_processed/livestock_it.tif")
+  elevation <- rast("/Volumes/Storage/data_processed/elevation_50m.tif")
+  slope <- rast("/Volumes/Storage/data_processed/slope_50m.tif")
+  open <- rast("/Volumes/Storage/data_processed/open.tif")
+  rivers <- rast("/Volumes/Storage/data_processed/rivers_50m.tif")
+  streams <- rast("/Volumes/Storage/data_processed/streams_50m.tif")
+
+# Fusing all the covariates into a layered
+  
+  covs <- c(roads, trails, settlement, livestock, elevation, slope, open, rivers, streams)
+  names(covs) <- c("roads", "trails", "settlement", "livestock",
+    "elevation", "slope", "open", "rivers", "streams")
+  
+# Checking that all is normal
+  print(covs) # 9 layers with the same res/ext/crs
+  plot(covs) # Every layer looks good
+  print(global(is.na(covs), "sum", na.rm = FALSE)) # gives the cells with NA 
+    # All cells need all 9 values, no NA
+      # roads      297013294
+      # trails     297013294
+      # settlement 297013301
+      # livestock  297400216
+      # elevation  297170140
+      # slope      297209310
+      # open       296824635
+      # rivers     297013294
+      # streams    297013294
+          
+# Keeping only cells where ALL nine covariates have data (no cell with an NA value)
+  NA_any <- any(is.na(covs))
+  covs   <- mask(covs, NA_any, maskvalues = TRUE)
+  
+  print(global(is.na(covs), "sum", na.rm = FALSE))   # all nine identical now
+    # roads      297577999
+    # trails     297577999
+    # settlement 297577999
+    # livestock  297577999
+    # elevation  297577999
+    # slope      297577999
+    # open       297577999
+    # rivers     297577999
+    # streams    297577999
+  
+  # Covariates with only the cells that have the full 9 values
+    roads_c      <- covs[["roads"]]
+    trails_c     <- covs[["trails"]]
+    settlement_c <- covs[["settlement"]]
+    livestock_c  <- covs[["livestock"]]
+    elevation_c  <- covs[["elevation"]]
+    slope_c      <- covs[["slope"]]
+    open_c       <- covs[["open"]]
+    rivers_c     <- covs[["rivers"]]
+    streams_c    <- covs[["streams"]]
+
+###################################
+### Transforming the covariates ###
+###################################
+  
+# Angular transformation (arcsin-square-root) for proportional covariates
+    # Roads, trails, settlement, open, rivers, streams
+    # Values should be between 1 and 0
+  
+  angular <- function(x) asin(sqrt(terra::clamp(x, lower = 0, upper = 1, values = TRUE)))
+    # values = TRUE, means that values outside the range become 0 or 1 rather than NA
+    # This prevents any random outlier to be considered and avoid error message
+  
+  roads_t <- angular(roads_c)
+  trails_t <- angular(trails_c)
+  settlement_t <- angular(settlement_c)
+  open_t <- angular(open_c)
+  rivers_t <- angular(rivers_c)
+  streams_t <- angular(streams_c)
+  
+  prop_covs_t <- c(roads_t, trails_t, settlement_t, open_t, rivers_t, streams_t)
+  
+  global(prop_covs_t, c("min", "max"), na.rm = TRUE) # Looks good
+      #             min       max
+      # roads        0  0.4291914
+      # trails       0  0.5238751
+      # settlement   0  1.5707964
+      # open         0  1.5707964
+      # rivers       0  0.2221289
+      # streams      0  0.2256791
+  
+# Logarithmic transformation for all others 
+    # Livestock, elevation, slope
+  
+  # Warning: log(0) and log(-ve) will give -inf of NaN
+  # Alternative is to use log1p(x) which is log (1 + x), better for small numbers
+  # And makes negative values become 0
+  
+  
+  log_safe <- function(x) {log1p(terra::clamp(x, lower = 0, values = TRUE))}
+    # values = TRUE means all values below 0 will become 0
+  
+  log_plain <- function(x) {
+    y <- global(x, "min", na.rm = TRUE)[1, 1] 
+      # [1, 1] will make it so only the number from the first row and first column is considered 
+    if (y <= 0) {return(log_safe(x))} # Makes sure that is any value is 0 or below, they fall into the log_safe function
+    log(x)} # anything other will simply be log transformed
+  
+  livestock_t <- log_plain(livestock_c)
+  elevation_t <- log_plain(elevation_c)
+  slope_t <- log_plain(slope_c)
+  
+  other_covs_t <- c(livestock_t, elevation_t, slope_t)
+
+  print(global(other_covs_t, c("min", "max"), na.rm = TRUE))
+    # no -inf or NaN, looks good
+    #                  min      max
+    # livestock   -0.9932877  5.758097
+    # elevation   0.0000000   8.415686
+    # slope       0.0000000   4.470239
+
+##############################################
+### Standardization of covariates: z-score ###
+##############################################
+  
+  # The exact method of standardization was a z-score standardization
+  # mean of 0 and a standard deviation of 1
+  # z-score = (x - mean) / standard deviation
+  
+  zscore <- function(x) {
+    m <- global(x, "mean", na.rm = TRUE)[1, 1] # Keeps only the mean
+    s <- global(x, "sd",   na.rm = TRUE)[1, 1] # Keeps only the standard deviation
+    (x - m) / s} # z-score calculation
+  
+  roads_s <- zscore(roads_t)
+  trails_s <- zscore(trails_t)
+  settlement_s <- zscore(settlement_t)
+  open_s <- zscore(open_t)
+  rivers_s <- zscore(rivers_t)
+  streams_s <- zscore(streams_t)
+  livestock_s <- zscore(livestock_t)
+  elevation_s <- zscore(elevation_t)
+  slope_s <- zscore(slope_t)
+  
+  covs_s <- c(roads_s, trails_s, settlement_s, open_s, rivers_s, streams_s,
+    livestock_s, elevation_s, slope_s)
+  names(covs_s) <- c("roads", "trails", "settlement", "open", "rivers",
+      "streams", "livestock", "elevation", "slope")
+  terra::writeRaster(covs_s, filename = "/Volumes/Storage/data_processed/covs_s.tif",
+    overwrite = TRUE)
+  print(global(covs_s, c("mean", "sd"), na.rm = TRUE)) # Mean = 0, sd = 1
+    #               mean        sd
+    # roads       1.672647e-09  1
+    # trails      1.140580e-08  1
+    # settlement  6.732833e-09  1
+    # open       -1.221897e-08  1
+    # rivers     -3.036803e-09  1
+    # streams     4.841317e-10  1
+    # livestock  -6.088285e-09  1
+    # elevation   1.284932e-08  1
+    # slope       2.954167e-09  1
+  
+###################################
+### Weighing and summing layers ###
+###################################
+  
+  # Weights the covariates based on the article's coefficients(Beta)
+
+# Dispersers:
+  
+  # mean of significant (grey) Long-movement coefficients (Rio-Maior Table S3, panels D & F)
+  # Roads:       (-1.48 + -1.12 + -0.73) / 3 = -1.1100
+  # Trails:      (-1.08 + -0.57 + -0.52) / 3 = -0.7233
+  # Settlement:  (-0.66 + -0.60 + -0.37) / 3 = -0.5433
+  # Livestock:   (-1.30 + -1.18 + -0.92) / 3 = -1.1333
+  # Elevation:   -0.84 / 1 = -0.8400   # only Night/Long grey
+  # Slope:       (-1.02 + -1.37 + -1.41) / 3 = -1.2667
+  # Open:        (-1.10 + -1.11 + -0.80) / 3 = -1.0033
+  # Rivers:      (-0.76 + -0.78 + -1.01) / 3 = -0.8500
+  # Streams:     (-0.33 + -0.51 + -0.44) / 3 = -0.4267
+  
+  sum_covs_dis <- sum(
+    roads_s  * -1.1100,
+    trails_s * -0.7233,
+    settlement_s * -0.5433,
+    livestock_s * -1.1333,
+    elevation_s * -0.8400,
+    slope_s  * -1.2667,
+    open_s   * -1.0033,
+    rivers_s * -0.8500,
+    streams_s * -0.4267)
+  
+  print(global(sum_covs_dis, c("min", "max", "mean", "sd"), na.rm = TRUE)) 
+    #     min      max        mean       sd
+    # -32.56076 8.899095 -2.415178e-08 2.294749
+    # mean is ~0, because every z-scored layer has mean 0
+  
+# Residents: 
+  # mean of significant (grey) Long-movement coefficients (Rio-Maior Table S3, panels D & F)
+  # Roads:       (-2.14 + -1.06 + -0.57) / 3 = -1.2567
+  # Trails:      (-1.35 + -0.77 + -0.43) / 3 = -0.8500
+  # Settlement:  (-1.49 + -0.79 + -0.72) / 3 = -1.0000
+  # Livestock:   (-0.78 + -0.97) / 2 = -0.8750   # Day/Long dropped (not grey)
+  # Elevation:   1.33 / 1 =  1.3300   # only Night/Long grey
+  # Slope:       (-0.86 + -1.23 + -1.53) / 3 = -1.2067
+  # Open:        (-0.90 + -0.71 + -0.43) / 3 = -0.6800
+  # Rivers:      (-1.06 + -1.20 + -1.05) / 3 = -1.1033
+  # Streams:     (-0.35 + -0.36 + -0.44) / 3 = -0.3833
+  
+  sum_covs_res <- sum(
+    roads_s  * -1.2567,
+    trails_s * -0.8500,
+    settlement_s * -1.0000,
+    livestock_s * -0.8750,
+    elevation_s * 1.3300,
+    slope_s  * -1.2067,
+    open_s   * -0.6800,
+    rivers_s * -1.1033,
+    streams_s * -0.3833)
+  
+  print(global(sum_covs_res, c("min", "max", "mean", "sd"), na.rm = TRUE))
+    #     min      max        mean       sd
+    # -43.13725 8.499322 2.397171e-08 2.73888
+  
+##################################
+### Creating a conductance map ###
+##################################
+  
+  # Using a logistic function to change the linear prediction into a probability 
+  # p = 1 / (1 + exp(-sum_covs))
+  
+# Dispersers
+  
+  prob_mvmt_dis <- 1 / (1 + exp(-sum_covs_dis))
+  global(prob_mvmt_dis, c("min", "max", "mean"), na.rm = TRUE)
+    #       min       max      mean  
+    # 7.228359e-15 0.9998635 0.5225957
+  names(prob_mvmt_dis) <- "prob_movement"
+  plot(prob_mvmt_dis, main = "Portugal model: probability of movement of dispersers")
+  
+  terra::writeRaster(prob_mvmt_dis, filename = "/Volumes/Storage/data_processed/cond_dis_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_prob_dis_POR.pdf", width = 6.3, height = 6.3)
+  plot(prob_mvmt_dis, mar = c(2, 2, 2, 5))
+  dev.off()
+
+# Residents 
+  
+  prob_mvmt_res <- 1 / (1 + exp(-sum_covs_res))
+  names(prob_mvmt_res) <- "prob_resident"
+  plot(prob_mvmt_res, main = "Portugal model: probability of movement of residents")
+  
+  print(global(prob_mvmt_res, c("min", "max", "mean"), na.rm = TRUE))
+  # Rio-Maior mean p 0.51 / 0.53 / 0.57
+  #     min       max      mean
+  # 1.843865e-19 0.9997965 0.5563079
+  
+  terra::writeRaster(prob_mvmt_res, filename = "/Volumes/Storage/data_processed/cond_res_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_prob_res_POR.pdf", width = 6.3, height = 6.3)
+  plot(prob_mvmt_res, mar = c(2, 2, 2, 5))
+  dev.off()
+  
+#########################
+### Threshold mapping ###
+#########################
+
+# Dispersers 
+  
+  high_cond_dis <- prob_mvmt_dis >= 0.5
+  freq(high_cond_dis)
+    #     layer value    count
+    # 1     1     0     45199013
+    # 2     1     1     54465540
+  plot(high_cond_dis, main = "High conductance dispersers (p >= 0.5)")
+  
+  terra::writeRaster(high_cond_dis, filename = "/Volumes/Storage/data_processed/high_cond_dis_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/high_0.5_conductance_prob_dis_POR.pdf", width = 6.3, height = 6.3)
+  plot(high_cond_dis, mar = c(2, 2, 2, 5))
+  dev.off()
+
+# Residents
+  
+  high_cond_res <- prob_mvmt_res >= 0.5
+  freq(high_cond_res)
+    #     layer value    count
+    # 1     1     0   39244974
+    # 2     1     1   60419579
+  plot(high_cond_res, main = "High conductance residents (p >= 0.5)")
+  
+  terra::writeRaster(high_cond_res, filename = "/Volumes/Storage/data_processed/high_cond_res_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/high_0.5_conductance_prob_res_POR.pdf", width = 6.3, height = 6.3)
+  plot(high_cond_res, mar = c(2, 2, 2, 5))
+  dev.off()
+  
+###################################
+### Relative selection strength ###
+###################################
+  
+# Useful for the Circuitscape analysis
+
+# Dispersers:   
+  RSS_dis <- exp(sum_covs_dis)
+  terra::writeRaster(RSS_dis, filename = "/Volumes/Storage/data_processed/cond_rss_dis_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_rss_dis_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(RSS_dis), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Residents
+  RSS_res <- exp(sum_covs_res)
+  terra::writeRaster(RSS_res, filename = "/Volumes/Storage/data_processed/cond_rss_res_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_rss_res_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(RSS_res), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+#################################
+### Creating a resistance map ###
+#################################
+  
+  # Resistance is the inverse of conductance: 1/P
+  
+  ### CHECK THIS!!! ###
+  # Circuitscape cannot handle super low numbers. 
+  # The sum of covs is currently 8 * 10^-15 (−32.45 linear predictor), with 1/P it gives 1.24 x 10^14, 
+  # When running circuitscape on such a huge range of numbers, it would crash or give weirtd results.
+  # Interestingly such low numbers are simply barriers, dense urban already hard to pass, 
+  # so flattening it with a cap costs nothing. 
+  # The 1st percentile of the linear predictor is -7.22 (p ≈ 0.0007), so capping the lower end at -8 leaves more than 99% of the data untouched
+  # Careful: the resistance calculation is a choice (NOT in Rio-Maior's article)
+
+# Dispersers:
+
+# Capped at p = -10
+  sum_floor_10 <- -10
+  
+  sum_covs_c_10_dis <- clamp(sum_covs_dis, lower = sum_floor_10, values = TRUE)
+  prob_capped_10_dis <- 1 / (1 + exp(-sum_covs_c_10_dis))
+  resistance_10_dis  <- 1 / prob_capped_10_dis 
+  
+  global(resistance_10_dis, c("min", "max"), na.rm = TRUE)
+    #      min      max
+    #   1.000136 22027.46
+  plot(resistance_10_dis , main = "Portugal model: resistance to movement of dispersers (cap = -10)")
+  
+  terra::writeRaster(resistance_10_dis, filename = "/Volumes/Storage/data_processed/resist_cap10_dis_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap10_dis_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_10_dis), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Capped at -8
+  sum_floor_8 <- -8
+  
+  sum_covs_c_8_dis  <- clamp(sum_covs_dis, lower = sum_floor_8, values = TRUE)
+  prob_capped_8_dis <- 1 / (1 + exp(-sum_covs_c_8_dis))
+  resistance_8_dis  <- 1 / prob_capped_8_dis
+  
+  global(resistance_8_dis, c("min", "max"), na.rm = TRUE)
+    #      min      max
+    # 1.000136 2981.958
+  plot(resistance_8_dis, main = "Portugal model: resistance to movement of dispersers (cap = -8)")
+  
+  terra::writeRaster(resistance_8_dis, filename = "/Volumes/Storage/data_processed/resist_cap8_dis_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap8_dis_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_8_dis), mar = c(2, 2, 2, 5))
+  dev.off()
+ 
+# Checking how many cells differ between each cap 
+  global(!is.na(resistance_8_dis), "sum", na.rm = TRUE) # 99664553 total cells with a value
+  difference_dis <- resistance_8_dis - resistance_10_dis
+  global(difference_dis != 0, "sum", na.rm = TRUE) # 683047 cells changed
+  global(abs(difference_dis), "max", na.rm = TRUE)
+    # They were changed by a max of 19045.51
+  100*global(difference_dis != 0, "sum", na.rm = TRUE)[1,1]/global(!is.na(resistance_8_dis), "sum", na.rm = TRUE)[1,1]
+    # 0.685346 % cells changed
+  global(abs(difference_dis), "sum", na.rm = TRUE) / global(difference_dis != 0, "sum", na.rm = TRUE)
+    # Mean of 12352.92
+  
+# Residents:
+
+# Capped at -10
+  
+  sum_covs_c_10_res  <- clamp(sum_covs_res, lower = sum_floor_10, values = TRUE)
+  prob_capped_10_res <- 1 / (1 + exp(-sum_covs_c_10_res))
+  resistance_10_res  <- 1 / prob_capped_10_res
+  
+  global(resistance_10_res, c("min", "max"), na.rm = TRUE)
+    #      min      max
+    #   1.000204 22027.46
+  plot(resistance_10_res, main = "Portugal model: resistance to movement of residents (cap = -10)")
+  
+  terra::writeRaster(resistance_10_res, filename = "/Volumes/Storage/data_processed/resist_cap10_res_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap10_res_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_10_res), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Capped at p = -8
+  
+  sum_covs_c_8_res  <- clamp(sum_covs_res, lower = sum_floor_8, values = TRUE)
+  prob_capped_8_res <- 1 / (1 + exp(-sum_covs_c_8_res))
+  resistance_8_res  <- 1 / prob_capped_8_res
+  
+  global(resistance_8_res, c("min", "max"), na.rm = TRUE)
+    #     min      max
+    # 1.000204 2981.958
+  plot(resistance_8_res, main = "Portugal model: resistance to movement of residents (cap = -8)")
+  
+  terra::writeRaster(resistance_8_res, filename = "/Volumes/Storage/data_processed/resist_cap8_res_POR.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap8_res_POR.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_8_res), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Checking how many cells differ between each cap 
+  global(!is.na(resistance_8_res), "sum", na.rm = TRUE) # 99664553 total cells with a value
+  difference_res <- resistance_8_res - resistance_10_res
+  global(difference_res != 0, "sum", na.rm = TRUE) # 1806254 cells changed
+  global(abs(difference_res), "max", na.rm = TRUE)
+    # They were changed by a max of 19045.51
+  100*global(difference_res != 0, "sum", na.rm = TRUE)[1,1]/global(!is.na(resistance_8_res), "sum", na.rm = TRUE)[1,1]
+    # 1.812333 % cells changed
+  global(abs(difference_res), "sum", na.rm = TRUE) / global(difference_res != 0, "sum", na.rm = TRUE)
+    # Mean of 12989.65
+  
+##################################
+### Saving some figures in pdf ###
+##################################
+  
+  resist_SLO     <- rast("/Volumes/Storage/data_processed/resist_cap8_SLO.tif")
+  resist_POR_dis <- rast("/Volumes/Storage/data_processed/resist_cap8_dis_POR.tif")
+  resist_POR_res <- rast("/Volumes/Storage/data_processed/resist_cap8_res_POR.tif")
+  
+  pdf("/Volumes/Storage/figures/composite_resistance_cap8.pdf",
+      width = 6.3, height = 2.1)   # A4 text-column width, 3 stacked panels
+    par(mfrow = c(1, 3), mar = c(1, 1, 1, 1))
+    plot(log10(resist_SLO), )
+    plot(log10(resist_POR_dis))
+    plot(log10(resist_POR_res))
+    dev.off()
+    
+#############################
+### END OF PORTUGAL MODEL ###
+###    congratulations!   ###
+#############################
