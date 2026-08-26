@@ -1,0 +1,119 @@
+# Updated: 26-08-2026
+
+########################################################################
+######################### CONNECTIVITY ANALYSES ########################
+########################################################################
+
+ # Conceptual steps : 
+    # LCP
+      # Path density maps + compare 3 surfaces
+      # Pinch point threshold sensitivity: 1% vs 5% for all 3 surfaces
+      # Pinch points + compare 3 surfaces
+      # Identify areas of interest (SLO / POR convergence)
+    # CS
+      # Normalize current density with flow potential map
+      # Correlation measure between 3 normalized current maps
+      # Pinch point threshold sensitivity: 1% vs 5% for all 3 surfaces
+      # Pinch points + compare 3 surfaces
+      # Identify areas of interest (SLO / POR convergence)
+    # Compare LCP vs CS pinch points
+
+#####################
+### Startup lines ###
+#####################
+  
+  library(terra)
+  dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
+  terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
+
+########################
+### Calling the data ###
+########################
+  
+  LCP_SLO_vect <- vect("/Volumes/Storage/data_processed/LCP_SLO_vect.gpkg")
+  LCP_POR_dis_vect <- vect("/Volumes/Storage/data_processed/LCP_POR_dis_vect.gpkg")
+  LCP_POR_res_vect <- vect("/Volumes/Storage/data_processed/LCP_POR_res_vect.gpkg")
+  wolf_points <- vect("/Volumes/Storage/data_processed/wolf_pts_clean.gpkg")
+  CS_cur_SLO <- rast("/Volumes/Storage/data_processed/cs_cur_SLO.asc")
+  CS_cur_POR_dis <- rast("/Volumes/Storage/data_processed/cs_cur_POR_dis.asc")
+  CS_cur_POR_res <- rast("/Volumes/Storage/data_processed/cs_cur_POR_res.asc")
+  CS_flow_POR <- rast("/Volumes/Storage/data_processed/cs_flow_POR.asc")
+  CS_flow_SLO <- rast("/Volumes/Storage/data_processed/cs_flow_SLO.asc")
+    
+###########################################
+### LCP: Path density maps + comparison ###
+###########################################
+  
+  # Making a raster template 
+    SLO_rast <- rast("/Volumes/Storage/data_processed/cond_SLO.tif")
+    POR_rast <- rast("/Volumes/Storage/data_processed/cond_dis_POR.tif")
+    
+  # Rasterizing the density (number) of paths passing through each cell
+    density_SLO <- rasterize(LCP_SLO_vect, SLO_rast, fun = "count", background = 0)
+      names(density_SLO) <- "path_density_SLO"
+    density_POR_dis <- rasterize(LCP_POR_dis_vect, POR_rast, fun = "count", background = 0)
+      names(density_POR_dis) <- "path_density_POR_dis"
+    density_POR_res <- rasterize(LCP_POR_res_vect, POR_rast, fun = "count", background = 0)
+      names(density_POR_res) <- "path_density_POR_res"
+    
+  # Limiting it the the same extent as the original conductance raster
+    density_SLO <- mask(density_SLO, SLO_rast)
+    density_POR_dis <- mask(density_POR_dis, POR_rast)
+    density_POR_res <- mask(density_POR_res, POR_rast)
+  
+  # Comparing density rasters between the 3 surfaces
+    density_df <- as.data.frame(c(density_POR_dis, density_POR_res, density_SLO), na.rm = TRUE)
+    density_long <- reshape( # reorganises as a stack of data, the data that was shaped as a wide set of data
+      density_vals, 
+      direction = "long",
+      varying = names(density_vals), # Column to combine
+      v.names = "density", # Name of the new combined density column
+      timevar = "surface",  # Name for the new combined surface column
+      times = names(density_vals)) # Valyes to fill the "surface" column
+    
+  # Testing for normality of distribution of the surface densities 
+    
+      # p-value is > 0.05, surfaces are not normally distributed
+    
+  # Kruskal-wallis
+      # Non-parametric, does not require a normal distribution
+      # Works with ranks -> chi-squared
+      # Null hypothesis H0: all surfaces are similar
+      # If significant = means at least one surface differs significantly from the others (not which)
+      # 
+    
+    kw_density <- kruskal.test(density ~ surface, data = density_long)
+    print(kw_density)
+
+    writeRaster(density_POR_dis, "/Volumes/Storage/data_processed/path_density_POR_dis.tif", overwrite = TRUE)
+
+##############################################
+### LCP: Pinch point threshold sensitivity ###
+##############################################
+
+######################################
+### LCP: Pinch points + comparison ###
+###################################### 
+    
+##########################################
+### LCP: Identifying areas of interest ###
+##########################################
+
+#############################################################
+### CS: Normalize current density with flow potential map ###
+#############################################################
+
+######################################################
+### CS: Correlation measure between 3 current maps ###
+######################################################
+
+#############################################
+### CS: Pinch point threshold sensitivity ###
+#############################################
+
+#############################################
+### CS: Pinch point threshold sensitivity ###
+#############################################
+############################
+### Comparing LCP and CS ###
+############################
