@@ -1,0 +1,66 @@
+# Updated: 26-8-2026
+
+############################################################################
+######################### WOLF LOCATION PROCESSING #########################
+############################################################################
+
+# Startup lines
+  library(terra)
+  library(sf)
+  library(sp)
+  dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
+  terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
+
+# Calling the raw data
+  wolf_raw <- read.csv("/Volumes/Storage/raw_data/wolf_locations.csv")
+  head(wolf_raw) # X    ID    Type         Region  EPSG DD MM YYYY   Sp Sex GenoID EST_EPSG4326 NORD_EPSG4326
+    # We can understand that the projection is in EPSG:4326 rather than EPSG:3035
+  nrow(wolf_raw) # 424
+  
+# Changing from a data frame to a vector
+  wolf_pts <- vect(wolf_raw, geom = c("EST_EPSG4326", "NORD_EPSG4326"), crs = "EPSG:4326")
+  
+# Reprojecting to EPSG:3035
+  wolf_pts_3035 <- project(wolf_pts, "EPSG:3035")
+  
+# Checking that all points fall into the resistance maps (for both models)
+  resist_SLO <- rast("/Volumes/Storage/data_processed/resist_cap8_SLO.tif")
+  resist_POR_dis <- rast("/Volumes/Storage/data_processed/resist_cap8_dis_POR.tif")
+  resist_POR_res <- rast("/Volumes/Storage/data_processed/resist_cap8_res_POR.tif")
+  
+  wolf_raw$val_SLO <- terra::extract(resist_SLO, wolf_pts_3035)[, 2] 
+    # extracts points falling in an NA cell in the Slovakia resistance map
+  wolf_raw$val_POR_dis <- terra::extract(resist_POR_dis, wolf_pts_3035)[, 2]
+    # extracts points falling in an NA cell in the Portugal dispersers resistance map
+  wolf_raw$val_POR_res <- terra::extract(resist_POR_res, wolf_pts_3035)[, 2]
+    # # extracts points falling in an NA cell in the Portugal residents resistance map
+  
+  na_summary <- data.frame(
+    ID         = wolf_raw$ID,
+    NA_SLO     = is.na(wolf_raw$val_SLO),
+    NA_POR_dis = is.na(wolf_raw$val_POR_dis),
+    NA_POR_res = is.na(wolf_raw$val_POR_res)) # builds a data.franme of any point that falls in a NA cell
+  na_summary[rowSums(na_summary[, -1]) > 0, ] # No points fall within at least one NA cell
+    
+# Save the re-projected data (used in LCP analysis)
+  terra::writeVector(wolf_pts_3035,
+    "/Volumes/Storage/data_processed/wolf_pts_clean.gpkg", overwrite = TRUE)
+  
+# Export cleaned points to use for Circuitscape
+  xy_coord <- crds(wolf_pts_clean) # Associates the cleaned data coordinates with x and y 
+  cs_points <- data.frame(
+    id        = seq_len(nrow(xy_coord)), # adds a new ID from 1 to 420 (instead of the original wolf ID)
+      # necessary for Circuitscape as it doesn't work well with IDs like W2023
+    x         = xy_coord[, 1], # x coordinates
+    y         = xy_coord[, 2]) # y coordinates
+  write.table(cs_points,file = "/Volumes/Storage/data_processed/wolf_points_cs.txt",
+    sep = "\t", row.names = FALSE, col.names = FALSE) # T0 use for the Circuitscape analyses
+
+# Mapping the wolf locations for supplementary information
+  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
+  pdf("/Volumes/Storage/figures/wolf_locations_map.pdf", width = 6.3, height = 6.3)
+  plot(italy_cont, col = "grey95", border = "black", mar = c(2, 2, 2, 2))
+  plot(st_geometry(wolf_pts_sf), add = TRUE, pch = 20, col = "black", cex = 0.6)
+  dev.off()  
+  
+ 
