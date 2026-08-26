@@ -1,0 +1,218 @@
+# Updated: 26-08-2026
+
+##################################################################
+######################### MODEL SLOVAKIA #########################
+##################################################################
+
+# Guimarães et al. 2025
+
+# Model:generalized linear mixed-effect models (GLMM) 
+  # second- order Resource Selection Functions (RSF) with a used-available design
+# Using the non-breeding best model coefficient
+
+# Conceptual steps:
+  # Standardizing continuous covariates (z-score) = all covariates comparable and unitless
+  # Weighting covariates (covariate * coefficient)
+  # Summing layers
+  # Changing to conducatnace / resistance maps
+  # Outputing (map)
+  
+#####################
+### Startup lines ###
+#####################
+  
+  library(terra)
+  dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
+  terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
+  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
+  template <- rast(ext(italy_cont), resolution = 50, crs = crs(italy_cont))
+  
+##############################
+### Calling the covariates ###
+##############################
+  
+  slope <- rast("/Volumes/Storage/data_processed/slope_50m.tif")
+  eastness <- rast("/Volumes/Storage/data_processed/eastness_50m.tif")
+  water <- rast("/Volumes/Storage/data_processed/dist_water_source_r.tif")
+  tree <- rast("/Volumes/Storage/data_processed/tree_cover_50m.tif")
+  snow <- rast("/Volumes/Storage/data_processed/snow_3035.tif")
+  landcover <- rast("/Volumes/Storage/data_processed/landcover_it_6.tif")
+  light <- rast("/Volumes/Storage/data_processed/night_light_it.tif")
+  
+####################################################
+### Standardizing continuous covariates: z-score ###
+####################################################
+  
+# For continuous covariates (not landcover as it is categorical)
+  # z-score: mean of 0 and a standard deviation of 1
+  # z-score = (x - mean) / standard deviation
+  
+  zscore <- function(x) {
+    m <- global(x, "mean", na.rm = TRUE)[1, 1] # Keeps only the mean
+    s <- global(x, "sd",   na.rm = TRUE)[1, 1] # Keeps only the standard deviation
+    (x - m) / s} # z-score calculation
+  
+  slope_s <- zscore(slope)
+  eastness_s <- zscore(eastness)
+  water_s <- zscore(water)
+  tree_s <- zscore(tree)
+  snow_s <- zscore(snow)
+  light_s <- zscore(light)
+  
+  covs_s <- c(slope_s, eastness_s, water_s, tree_s, snow_s, light_s)
+  names(covs_s) <- c("slope", "eastness", "water", "tree", "snow", "light")
+  global(covs_s, c("mean", "sd"), na.rm = TRUE) # Mean = 0, sd = 1
+    #             mean      sd
+    # slope    -2.279393e-10  1
+    # eastness -8.899967e-09  1
+    # water     8.246246e-09  1
+    # tree      2.234602e-08  1
+    # snow     -1.829666e-08  1
+    # light     2.854527e-09  1
+  
+###################################################
+### Map each landcover class to its coefficient ###
+###################################################
+  
+  land_coef_class <- matrix(c(
+    1, -1.938,
+    2, -1.727,
+    3, -2.023,
+    4, -1.098,
+    5, -2.143,
+    6, -3.546,
+    7, -3.546    # unmapped (urban/water/bare) -> least-suitable floor
+  ), ncol = 2, byrow = TRUE)
+  
+  landcover_w <- classify(landcover, rcl = land_coef_class) # weighted landcover layer
+  
+###################################
+### Weighing and summing layers ###
+###################################
+  
+  # Steepness (coefficient: -0.517)
+  # Eastness (coefficient: 0.157)
+  # Distance to water (coefficient: 0.352)
+  # Tree cover density (coefficient: -0.222)
+  # Snow cover duration (coefficient: 0.230)
+  # Landcover type
+  # Deciduous forest (coefficient: -1.938)
+  # Coniferous forest (coefficient: -1.727)
+  # Mixed forest (coefficient: -2.023)
+  # Transition to shrubland (coefficient: -1.098)
+  # Meadows and pastures (coefficient: -2.143)
+  # Agricultural land (coefficient: -3.546)
+  # Night-time light (coefficient: -0.447)
+  
+  sum_covs <- sum(
+    slope_s * -0.517,
+    eastness_s * 0.157,
+    water_s * 0.352,
+    tree_s * -0.222,
+    snow_s * 0.230,
+    landcover_w,  # previously weighted
+    light_s * -0.447)
+  
+  global(sum_covs, c("min", "max", "mean", "sd"), na.rm = TRUE)
+    #   min      max      mean        sd
+    # -29.43827 2.408066 -2.583569 0.9681882
+  
+
+##################################
+### Creating a conductance map ###
+##################################
+  
+  # Using a logistic function to change the linear prediction into a probability 
+  # p = 1 / (1 + exp(-sum_covs))
+  
+  prob_mvmt <- 1 / (1 + exp(-sum_covs))
+  global(prob_mvmt, c("min", "max", "mean"), na.rm = TRUE)
+    #   min           max          mean
+    # 1.641055e-13 0.9174403 0.09540744
+  plot(prob_mvmt, main = "Slovakia model: probability of movement")
+  plot(italy_cont, add = TRUE)
+  
+  terra::writeRaster(prob_mvmt, filename = "/Volumes/Storage/data_processed/cond_SLO.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_prob_SLO.pdf", width = 6.3, height = 6.3)
+  plot(prob_mvmt, mar = c(2, 2, 2, 5))
+  dev.off()
+  
+###################################
+### Relative selection strength ###
+###################################
+  
+  # Useful for the Circuitscape analysis
+  
+  RSS <- exp(sum_covs)
+  terra::writeRaster(RSS, filename = "/Volumes/Storage/data_processed/cond_rss_SLO.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/conductance_rss_SLO.pdf", width = 6.3, height = 6.3)
+  plot(RSS, mar = c(2, 2, 2, 5))
+  dev.off()
+  
+#################################
+### Creating a resistance map ###
+#################################
+  
+  # Resistance is the inverse of conductance: 1/P
+  
+### CHECK THIS!!! ###
+  # Circuitscape cannot handle super low numbers. 
+  # The sum of covs reaches -30.14 (p = 8e-14), with 1/P it gives 1.23e13, 
+  # When running circuitscape on such a huge range of numbers, it would crash or give weird results.
+  # Interestingly such low numbers are simply barriers, dense urban / agriculture already hard to pass, 
+  # so flattening it with a cap costs nothing. 
+  # Careful: the resistance calculation is a choice (NOT in Guimaraes' article)
+    quantile(values(sum_covs), 0.01, na.rm = TRUE) # -5.206025 (1%)
+  
+ # Capped at -10
+  sum_floor_10 <- -10
+  
+  sum_covs_c_10 <- clamp(sum_covs, lower = sum_floor_10, values = TRUE)
+  prob_capped_10 <- 1 / (1 + exp(-sum_covs_c_10))
+  resistance_10  <- 1 / prob_capped_10
+  
+  global(resistance_10, c("min", "max"), na.rm = TRUE)
+    # min        max
+    # 1.089989 22027.46
+  plot(resistance_10, main = "Slovakia model: resistance to movement (cap = -10)")
+  plot(italy_cont, add = TRUE)
+  
+  terra::writeRaster(resistance_10, filename = "/Volumes/Storage/data_processed/resist_cap10_SLO.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap10_SLO.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_10), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Capped at -8
+  sum_floor_8 <- -8
+  
+  sum_covs_c_8  <- clamp(sum_covs, lower = sum_floor_8, values = TRUE)
+  prob_capped_8 <- 1 / (1 + exp(-sum_covs_c_8))
+  resistance_8  <- 1 / prob_capped_8
+  
+  global(resistance_8, c("min", "max"), na.rm = TRUE)
+    # min         max
+    # 1.089989 2981.958
+  plot(resistance_8, main = "Slovakia model: resistance to movement (cap = -8)")
+  plot(italy_cont, add = TRUE)
+  
+  terra::writeRaster(resistance_8, filename = "/Volumes/Storage/data_processed/resist_cap8_SLO.tif", overwrite = TRUE)
+  pdf("/Volumes/Storage/figures/resist_cap8_SLO.pdf", width = 6.3, height = 6.3)
+  plot(log10(resistance_8), mar = c(2, 2, 2, 5))
+  dev.off()
+  
+# Checking how many cells differ between each cap
+  global(!is.na(resistance_8), "sum", na.rm = TRUE) # 100011946 total cells with a value
+  difference <- resistance_8 - resistance_10
+  global(difference != 0, "sum", na.rm = TRUE) # 75419 cells changed
+  global(abs(difference), "max", na.rm = TRUE) 
+    # They were changed by a max of 19045.51
+  100*global(difference != 0, "sum", na.rm = TRUE)[1,1]/global(!is.na(resistance_8), "sum", na.rm = TRUE)[1,1]
+    # 0.07540999 % changed
+  global(abs(difference), "sum", na.rm = TRUE) / global(difference != 0, "sum", na.rm = TRUE)
+    # Mean of 7892.083 
+  
+#############################
+### END OF SLOVAKIA MODEL ###
+###    congratulations!   ###
+#############################  
+  
