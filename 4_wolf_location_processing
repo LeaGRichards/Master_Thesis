@@ -1,5 +1,3 @@
-# Updated: 26-8-2026
-
 ############################################################################
 ######################### WOLF LOCATION PROCESSING #########################
 ############################################################################
@@ -45,22 +43,3 @@
 # Save the re-projected data (used in LCP analysis)
   terra::writeVector(wolf_pts_3035,
     "/Volumes/Storage/data_processed/wolf_pts_clean.gpkg", overwrite = TRUE)
-  
-# Export cleaned points to use for Circuitscape
-  xy_coord <- crds(wolf_pts_clean) # Associates the cleaned data coordinates with x and y 
-  cs_points <- data.frame(
-    id        = seq_len(nrow(xy_coord)), # adds a new ID from 1 to 420 (instead of the original wolf ID)
-      # necessary for Circuitscape as it doesn't work well with IDs like W2023
-    x         = xy_coord[, 1], # x coordinates
-    y         = xy_coord[, 2]) # y coordinates
-  write.table(cs_points,file = "/Volumes/Storage/data_processed/wolf_points_cs.txt",
-    sep = "\t", row.names = FALSE, col.names = FALSE) # T0 use for the Circuitscape analyses
-
-# Mapping the wolf locations for supplementary information
-  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
-  pdf("/Volumes/Storage/figures/wolf_locations_map.pdf", width = 6.3, height = 6.3)
-  plot(italy_cont, col = "grey95", border = "black", mar = c(2, 2, 2, 2))
-  plot(st_geometry(wolf_pts_sf), add = TRUE, pch = 20, col = "black", cex = 0.6)
-  dev.off()  
-  
- 
