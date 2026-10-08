@@ -331,15 +331,15 @@
           units = "in", res = 600)
       par(mfrow = c(2, 2), mar = c(1, 1, 1, 1))
       
-      plot(italy_cont, col = "grey95", border = "grey50", mar = c(1, 1, 1, 1))
+      plot(italy_cont, col = "grey95", border = "grey50", mar = c(3, 2, 1, 2))
       plot(LCP_SLO_vect, col = "black", lwd = 0.1, add = TRUE)
       plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
       
-      plot(italy_cont, col = "grey95", border = "grey50", mar = c(1, 1, 1, 1))
+      plot(italy_cont, col = "grey95", border = "grey50", mar = c(3, 2, 1, 2))
       plot(LCP_POR_dis_vect, col = "black", lwd = 0.1, add = TRUE)
       plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
       
-      plot(italy_cont, col = "grey95", border = "grey50", mar = c(1, 1, 1, 1))
+      plot(italy_cont, col = "grey95", border = "grey50", mar = c(3, 2, 1, 2))
       plot(LCP_POR_res_vect, col = "black", lwd = 0.1, add = TRUE)
       plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
       
