@@ -1,28 +1,19 @@
-# Updated: 26-08-2026
-
 ########################################################################
 ######################### CONNECTIVITY ANALYSES ########################
 ########################################################################
 
  # Conceptual steps : 
-    # LCP
-      # Path density maps + compare 3 surfaces
-      # Pinch point threshold sensitivity: 1% vs 5% for all 3 surfaces
-      # Pinch points + compare 3 surfaces
-      # Identify areas of interest (SLO / POR convergence)
-    # CS
-      # Normalize current density with flow potential map
-      # Correlation measure between 3 normalized current maps
-      # Pinch point threshold sensitivity: 1% vs 5% for all 3 surfaces
-      # Pinch points + compare 3 surfaces
-      # Identify areas of interest (SLO / POR convergence)
-    # Compare LCP vs CS pinch points
+    # Path density maps
+    # Sliding-window density map at 50m radius
+    # Pinch points + compare 3 surfaces
+    # Identify areas of interest (SLO / POR convergence)
 
 #####################
 ### Startup lines ###
 #####################
   
   library(terra)
+  library(sf)
   dir.create("/Volumes/Storage/terra_tmp", showWarnings = FALSE)
   terraOptions(tempdir = "/Volumes/Storage/terra_tmp")
 
@@ -30,20 +21,16 @@
 ### Calling the data ###
 ########################
   
-  LCP_SLO_vect <- vect("/Volumes/Storage/data_processed/LCP_SLO_vect.gpkg")
-  LCP_POR_dis_vect <- vect("/Volumes/Storage/data_processed/LCP_POR_dis_vect.gpkg")
-  LCP_POR_res_vect <- vect("/Volumes/Storage/data_processed/LCP_POR_res_vect.gpkg")
+  LCP_SLO_vect <- vect("/Volumes/Storage/Results_LCP_CS/merged_lcp_resist_cap10_SLO.shp")
+  LCP_POR_dis_vect <- vect("/Volumes/Storage/Results_LCP_CS/merged_lcp_resist_cap10_dis_POR.shp")
+  LCP_POR_res_vect <- vect("/Volumes/Storage/Results_LCP_CS/merged_lcp_resist_cap10_res_POR.shp")
   wolf_points <- vect("/Volumes/Storage/data_processed/wolf_pts_clean.gpkg")
-  CS_cur_SLO <- rast("/Volumes/Storage/data_processed/cs_cur_SLO.asc")
-  CS_cur_POR_dis <- rast("/Volumes/Storage/data_processed/cs_cur_POR_dis.asc")
-  CS_cur_POR_res <- rast("/Volumes/Storage/data_processed/cs_cur_POR_res.asc")
-  CS_flow_POR <- rast("/Volumes/Storage/data_processed/cs_flow_POR.asc")
-  CS_flow_SLO <- rast("/Volumes/Storage/data_processed/cs_flow_SLO.asc")
+  italy_cont <- vect("/Volumes/Storage/data_processed/italy_cont_3035.gpkg")
+
+######################################################################
+### Sliding-window density map at multiple radii (50/100/200/500m) ###
+######################################################################
     
-###########################################
-### LCP: Path density maps + comparison ###
-###########################################
-  
   # Making a raster template 
     SLO_rast <- rast("/Volumes/Storage/data_processed/cond_SLO.tif")
     POR_rast <- rast("/Volumes/Storage/data_processed/cond_dis_POR.tif")
@@ -60,60 +47,300 @@
     density_SLO <- mask(density_SLO, SLO_rast)
     density_POR_dis <- mask(density_POR_dis, POR_rast)
     density_POR_res <- mask(density_POR_res, POR_rast)
-  
-  # Comparing density rasters between the 3 surfaces
-    density_df <- as.data.frame(c(density_POR_dis, density_POR_res, density_SLO), na.rm = TRUE)
-    density_long <- reshape( # reorganises as a stack of data, the data that was shaped as a wide set of data
-      density_vals, 
-      direction = "long",
-      varying = names(density_vals), # Column to combine
-      v.names = "density", # Name of the new combined density column
-      timevar = "surface",  # Name for the new combined surface column
-      times = names(density_vals)) # Valyes to fill the "surface" column
     
-  # Testing for normality of distribution of the surface densities 
-    
-      # p-value is > 0.05, surfaces are not normally distributed
-    
-  # Kruskal-wallis
-      # Non-parametric, does not require a normal distribution
-      # Works with ranks -> chi-squared
-      # Null hypothesis H0: all surfaces are similar
-      # If significant = means at least one surface differs significantly from the others (not which)
-      # 
-    
-    kw_density <- kruskal.test(density ~ surface, data = density_long)
-    print(kw_density)
-
+  # Saving rasters as processed data (path density)
+    writeRaster(density_SLO, "/Volumes/Storage/data_processed/path_density_SLO.tif", overwrite = TRUE)
+      density_SLO <- rast("/Volumes/Storage/data_processed/path_density_SLO.tif")
     writeRaster(density_POR_dis, "/Volumes/Storage/data_processed/path_density_POR_dis.tif", overwrite = TRUE)
-
-##############################################
-### LCP: Pinch point threshold sensitivity ###
-##############################################
-
-######################################
-### LCP: Pinch points + comparison ###
-###################################### 
+      density_POR_dis <- rast("/Volumes/Storage/data_processed/path_density_POR_dis.tif")
+    writeRaster(density_POR_res, "/Volumes/Storage/data_processed/path_density_POR_res.tif", overwrite = TRUE)
+      density_POR_res <- rast("/Volumes/Storage/data_processed/path_density_POR_res.tif")
+      
+  # 50m radius window 
+    window_area_50 <- pi * 50^2
     
-##########################################
-### LCP: Identifying areas of interest ###
-##########################################
+  # Making a square matrix in which the circle moving window can be
+    # And giving every cell within that circle the value 1, 
+    # And value 0 to cells outside the circle (square corners)
+    window_mat_50_POR_dis <- focalMat(POR_rast, 50, "circle") 
+      window_mat_50_POR_dis[window_mat_50_POR_dis > 0] <- 1 
+    window_mat_50_POR_res <- focalMat(POR_rast, 50, "circle")
+      window_mat_50_POR_res[window_mat_50_POR_res > 0] <- 1
+    window_mat_50_SLO <- focalMat(SLO_rast, 50, "circle")
+      window_mat_50_SLO[window_mat_50_SLO > 0] <- 1
+      
+  # Calculating the value for each cell based on the SUM of the values in the focal window 
+    focal_sum_50_POR_dis <- focal(density_POR_dis, w = window_mat_50_POR_dis, fun = "sum", na.rm = TRUE)
+    focal_sum_50_POR_res <- focal(density_POR_res, w = window_mat_50_POR_res, fun = "sum", na.rm = TRUE)
+    focal_sum_50_SLO <- focal(density_SLO, w = window_mat_50_SLO, fun = "sum", na.rm = TRUE)
+    
+  # Dividing the sum by the number of considered cells = average
+    # And multiplying by 1e6 to change from "# of lines/m2" to "# of lines/km2"
+    density_50_POR_dis <- (focal_sum_50_POR_dis / window_area_50) * 1e6
+      names(density_50_POR_dis) <- "line_density_50m_POR_dis"
+    density_50_POR_res <- (focal_sum_50_POR_res / window_area_50) * 1e6
+      names(density_50_POR_res) <- "path_density_50m_POR_res"
+    density_50_SLO <- (focal_sum_50_SLO / window_area_50) * 1e6
+      names(density_50_SLO) <- "path_density_50m_SLO"
+    
+  # Saving as raster for future use
+    writeRaster(density_50_POR_dis, "/Volumes/Storage/data_processed/line_density_50m_POR_dis.tif", overwrite = TRUE)
+      density_50_POR_dis <- rast("/Volumes/Storage/data_processed/line_density_50m_POR_dis.tif")
+    writeRaster(density_50_POR_res, "/Volumes/Storage/data_processed/path_density_50m_POR_res.tif", overwrite = TRUE)
+      density_50_POR_res <- rast("/Volumes/Storage/data_processed/path_density_50m_POR_res.tif")
+    writeRaster(density_50_SLO, "/Volumes/Storage/data_processed/path_density_50m_SLO.tif", overwrite = TRUE)
+      density_50_SLO <- rast("/Volumes/Storage/data_processed/path_density_50m_SLO.tif")
 
-#############################################################
-### CS: Normalize current density with flow potential map ###
-#############################################################
+########################################
+### Pinch point threshold at 1% ###
+########################################
 
-######################################################
-### CS: Correlation measure between 3 current maps ###
-######################################################
+  # Keeping only the highest 1% of the values
+    threshold_POR_dis <- quantile(values(density_50_POR_dis, mat = FALSE), probs = 0.99, na.rm = TRUE)
+      pinch_POR_dis <- density_50_POR_dis >= threshold_POR_dis # keeping anything above or equal to the 99th quantile
+      names(pinch_POR_dis) <- "pinch_POR_dis"
+      writeRaster(pinch_POR_dis, "/Volumes/Storage/data_processed/pinch_POR_dis.tif", overwrite = TRUE)
+      pinch_POR_dis <- rast("/Volumes/Storage/data_processed/pinch_POR_dis.tif")
+      
+      
+    threshold_POR_res <- quantile(values(density_50_POR_res, mat = FALSE), probs = 0.99, na.rm = TRUE)
+      pinch_POR_res <- density_50_POR_res >= threshold_POR_res # keeping anything above or equal to the 99th quantile
+      names(pinch_POR_res) <- "pinch_POR_res"
+      writeRaster(pinch_POR_res, "/Volumes/Storage/data_processed/pinch_POR_res.tif", overwrite = TRUE)
+      pinch_POR_res <- rast("/Volumes/Storage/data_processed/pinch_POR_res.tif")
+      
+    threshold_SLO <- quantile(values(density_50_SLO, mat = FALSE), probs = 0.99, na.rm = TRUE)
+      pinch_SLO <- density_50_SLO >= threshold_SLO # keeping anything above or equal to the 99th quantile
+      names(pinch_SLO) <- "pinch_SLO"
+      writeRaster(pinch_SLO, "/Volumes/Storage/data_processed/pinch_SLO.tif", overwrite = TRUE)
+      pinch_SLO <- rast("/Volumes/Storage/data_processed/pinch_SLO.tif")
 
-#############################################
-### CS: Pinch point threshold sensitivity ###
-#############################################
+  # Getting some information
+    global(pinch_SLO, "sum", na.rm = TRUE) # 1001844 cells kept
+    global(pinch_POR_dis, "sum", na.rm = TRUE) # 1002874
+    global(pinch_POR_res, "sum", na.rm = TRUE) # 999129 cells kept
+    
+    dens_SLO_top <- mask(density_50_SLO, pinch_SLO, maskvalue = 0)
+    dens_POR_dis_top <- mask(density_50_POR_dis, pinch_POR_dis, maskvalue = 0)
+    dens_POR_res_top <- mask(density_50_POR_res, pinch_POR_res, maskvalue = 0)
+      # this reduced the density datasets to only the cells kept in the 1% threshold
+    
+    global(dens_SLO_top,     c("min", "max", "mean", "sd"), na.rm = TRUE) # 11586.48 208429.3 47176.06 30490.07
+    global(dens_POR_dis_top, c("min", "max", "mean", "sd"), na.rm = TRUE) # 24191.55 201553.8 51721.4 26427.5
+    global(dens_POR_res_top, c("min", "max", "mean", "sd"), na.rm = TRUE) # 18080 171123.4 47925.47 25511.47
+    
+###############################
+### Pinch points comparison ###
+###############################
+    
+  # Comparing the 3 pinch-point maps using Jaccard overlap = intersection / union
+    # paired comparison
+    # intersection = shared elements; union = unique elements (across both maps)
+    # 1 = perfect overlap; 0 = no overlap at all
+      
+  # POR_dis vs POR_res
+    both_PORdis_PORres <- global(pinch_POR_dis & pinch_POR_res, "sum", na.rm = TRUE)[1, 1]
+    either_PORdis_PORres <- global(pinch_POR_dis | pinch_POR_res, "sum", na.rm = TRUE)[1, 1]
+    jaccard_PORdis_PORres <- both_PORdis_PORres / either_PORdis_PORres
+    
+  # POR_dis vs SLO
+    both_PORdis_SLO <- global(pinch_POR_dis & pinch_SLO, "sum", na.rm = TRUE)[1, 1]
+    either_PORdis_SLO <- global(pinch_POR_dis | pinch_SLO, "sum", na.rm = TRUE)[1, 1]
+    jaccard_PORdis_SLO <- both_PORdis_SLO / either_PORdis_SLO
+    
+  # POR_res vs SLO
+    both_PORres_SLO <- global(pinch_POR_res & pinch_SLO, "sum", na.rm = TRUE)[1, 1]
+    either_PORres_SLO <- global(pinch_POR_res | pinch_SLO, "sum", na.rm = TRUE)[1, 1]
+    jaccard_PORres_SLO <- both_PORres_SLO / either_PORres_SLO
+      
+  # Results
+    jaccard_results <- c(POR_dis_vs_POR_res = jaccard_PORdis_PORres,
+      POR_dis_vs_SLO = jaccard_PORdis_SLO,
+      POR_res_vs_SLO = jaccard_PORres_SLO)
+      print(jaccard_results)
+        # POR_dis_vs_POR_res     POR_dis_vs_SLO     POR_res_vs_SLO 
+        #   0.07269910            0.01724434         0.02401949 
+        # So: POR_dis and POR_res agree with each other more than either agree with SLO
+    
+#########################################
+### Identifying the areas of interest ###
+#########################################
+  
+  # An area of interest is a pinch point in SLO AND in at least one of the two 
+      # Portugal models (disperser or resident), and another groups with all 3 models
+    lcp_convergence <- pinch_SLO & (pinch_POR_dis | pinch_POR_res)
+      names(lcp_convergence) <- "lcp_convergence_SLO_POR"
+      writeRaster(lcp_convergence, "/Volumes/Storage/data_processed/lcp_convergence_SLO_POR.tif", overwrite = TRUE)
+      lcp_convergence <- rast("/Volumes/Storage/data_processed/lcp_convergence_SLO_POR.tif")
+      global(lcp_convergence, "sum", na.rm = TRUE) # 69359 cells
+      
+    lcp_convergence_3 <- pinch_SLO & (pinch_POR_dis & pinch_POR_res)
+      names(lcp_convergence_3) <- "lcp_convergence_SLO_POR_3"
+      writeRaster(lcp_convergence_3, "/Volumes/Storage/data_processed/lcp_convergence_SLO_POR_3.tif", overwrite = TRUE)
+      lcp_convergence_3 <- rast("/Volumes/Storage/data_processed/lcp_convergence_SLO_POR_3.tif")
+      global(lcp_convergence_3, "sum", na.rm = TRUE) # 11560 cells
+  
+  # Changing the scattered raster cells into discrete areas of interest
+    convergence_patches <- patches(lcp_convergence, directions = 8, zeroAsNA = TRUE)
+        # patches() takes continuous groups of non-NA cells and groups them as a patch
+        # directions = 8 indicates that all 8 neighbouring cells are to be considered
+        # zeroAsNA = TRUE means that cells with the value 0 are to be considered as NA
+          # This avoids 0 cells to get patched into one big patch ! 
+      global(convergence_patches, "max", na.rm = TRUE) # 6436 patches (average of about 10.8 cells per patch)
+      patch_sizes <- freq(convergence_patches)
+      summary(patch_sizes$count)
+        # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+        # 1.0     3.0     6.0    11.3    11.0   201.0 
+      sum(patch_sizes$count == 1) # 1004 patches are just one cell (15.6% of patches, 1,004/6,436 * 100)
+      sum(patch_sizes$count >= 10) # 1859 patches have 10 or more cells
+      sum(patch_sizes$count >= 100) # 43 
+      sum(patch_sizes$count >= 150) # 5
+      hist(patch_sizes$count, breaks = 50, main = "Convergence patch sizes", xlab = "Number of cells per patch")
+        # right-skewed histogram
+      top_patches <- patch_sizes[order(-patch_sizes$count), ]
+      head(top_patches, 20)
+        #       layer value count
+        # 4202     1  4437   201
+        # 4939     1  5202   180
+        # 4247     1  4483   170
+        # 5168     1  5444   163
+        # 6094     1  6390   161
+        # 6090     1  6386   146
+        # 4860     1  5121   137
+        # 2998     1  3150   136
+        # 594      1   602   134
+        # 4328     1  4567   134
+        # 5881     1  6175   134
+        # 3060     1  3215   132
+        # 3882     1  4097   132
+        # 4297     1  4536   130
+        # 588      1   596   129
+        # 5989     1  6285   125
+        # 288      1   291   124
+        # 6054     1  6350   124
+        # 4220     1  4455   122
+        # 6119     1  6415   122
+      top_ids <- head(top_patches, 20)$value
+  
+  # Extracting the centroid coordinates of these 20 patches
+    x_rast <- init(convergence_patches, "x")
+    y_rast <- init(convergence_patches, "y")
+      # init() creates a raster (from the convergence_patches raster in this case)
+      # and each cell has a specific cell property, x and y coordinates in this case
+    centroid_x <- zonal(x_rast, convergence_patches, fun = "mean", na.rm = TRUE)
+    centroid_y <- zonal(y_rast, convergence_patches, fun = "mean", na.rm = TRUE)
+      # groups cells by zones (defined by convergence_patches) and makes the mean 
+      # of the values found in an equivalent second raster (x_rast or y_rast)
+      # gives the centroid point in x and y coordinates
+    top_centroid_x <- centroid_x[centroid_x$patches %in% top_ids, ]
+    top_centroid_y <- centroid_y[centroid_y$patches %in% top_ids, ]
+      # Takes the x and y patch coordinates of only the patches found in top_ids (20 top patches)
+    
+  # Plotting the centroids on the study area
+    plot(!is.na(POR_rast), col = c(NA, "grey95"), legend = FALSE,
+         main = "Top 20 convergence patches")
+      # !is.na makes the raster a TRUE or FALSE raster based on NA, makes a nice greyed Italy shape
+    points(top_centroid_x$x, top_centroid_y$y, col = "red", pch = 19, cex = 1.2)
+      # AMAZING 
+    
+  # Making a table with the coordinates (in EPSG:3035)
+    top_table <- data.frame(patch_id = top_centroid_x$patches,
+      x_3035 = top_centroid_x$x, y_3035 = top_centroid_y$y)
+    top_table$n_cells <- patch_sizes$count[match(top_table$patch_id, patch_sizes$value)]
+      # this adds the number of cells per patch
+      # match() takes for each value in patch_id, where that value sits in patch_sizes$value
+    
+  # Reprojecting to longitude and latitude for the results section
+    top_points_small <- vect(top_table, geom = c("x_3035", "y_3035"), crs = crs(POR_rast))
+      # Makes the top table an actual list of locations (coordinates)
+    top_points_latlon <- project(top_points_small, "EPSG:4326")
+      # Reprojects the coordinates in EPSG:4326 (better for readability of thesis)
+    top_table$lon <- crds(top_points_latlon)[, 1]
+    top_table$lat <- crds(top_points_latlon)[, 2]
+      # Extracts the coordinate values of each point
+    
+  # Adding the area of each patch in km2
+    top_table$area_km2 <- top_table$n_cells * (res(SLO_rast)[1] * res(SLO_rast)[2]) / 1e6
+    
+  # Making a table of coordinates in longitude and latitude (from biggest to smallest)
+    top_table <- top_table[order(-top_table$n_cells), ]
+    print(top_table)
+    write.csv(top_table, "/Volumes/Storage/data_processed/top20_convergence_patches.csv", row.names = FALSE)
+  
+  # Saving the 
+    pdf("/Volumes/Storage/figures/top20_convergence_patches_map.pdf", width = 6.3, height = 6.3)
+      plot(hillshade_masked)
+      points(top_table$x_3035, top_table$y_3035, col = "black", pch = 16, cex = 1)
+      dev.off()
+      
+###############
+### Figures ###
+###############
+      
+  # Raw path density maps, 3 surfaces together
+    pdf("/Volumes/Storage/figures/composite_density_cap10.pdf",
+        width = 6.3, height = 2.1)   # A4 text-column width, 3 stacked panels
+      par(mfrow = c(1, 3), mar = c(1, 1, 1, 1))
+      plot(density_SLO)
+      plot(density_POR_dis)
+      plot(density_POR_res)
+      dev.off()
+ 
+  # 50m smoothed density maps, 3 surfaces together
+    pdf("/Volumes/Storage/figures/composite_density_50m.pdf",
+        width = 6.3, height = 2.1)   # A4 text-column width, 3 stacked panels
+      par(mfrow = c(1, 3), mar = c(1, 1, 1, 1))
+      plot(density_50_SLO)
+      plot(density_50_POR_dis)
+      plot(density_50_POR_res)
+      dev.off()
+ 
+  # Pinch point maps (1% threshold), 3 surfaces together
+    pdf("/Volumes/Storage/figures/composite_pinch_points.pdf",
+          width = 6.3, height = 6.3)   # A4 text-column width, 3 stacked panels
+      par(mfrow = c(2, 2), mar = c(1, 1, 1, 1))
+      plot(pinch_SLO)
+      plot(pinch_POR_dis)
+      plot(pinch_POR_res)
+      dev.off()
+      
+  # Histogram of patches
+    pdf("/Volumes/Storage/figures/top20_hist.pdf", width = 6.3, height = 4)
+      hist(patch_sizes$count, breaks = 50, main = "", xlab = "", ylab = "")
+      dev.off()
+  
+  # Saving the final map 
+    
+    # Calling an elevation map for context
+      elevation <- rast("/Volumes/Storage/data_processed/elevation_50m.tif")
+      
+    # Proportional point size
+      cex_min <- 0.6
+      cex_max <- 2.5
+      
+      top_table$cex <- cex_min + (sqrt(top_table$n_cells) - sqrt(min(top_table$n_cells))) /
+        (sqrt(max(top_table$n_cells)) - sqrt(min(top_table$n_cells))) * (cex_max - cex_min)
+      
+    pdf("/Volumes/Storage/figures/top20_convergence_patches_map.pdf", width = 4, height = 4)
+      plot(elevation)
+      points(top_table$x_3035, top_table$y_3035, col = "red", pch = 19, cex = top_table$cex)
+      dev.off()
 
-#############################################
-### CS: Pinch point threshold sensitivity ###
-#############################################
-############################
-### Comparing LCP and CS ###
-############################
+  # LCP map
+    png("/Volumes/Storage/figures/composite_lcp_paths.png", width = 6.3, height = 6.3,
+          units = "in", res = 600)
+      par(mfrow = c(2, 2), mar = c(1, 1, 1, 1))
+      
+      plot(italy_cont, col = "grey95", border = "grey50", axes = FALSE, mar = c(1, 1, 1, 1))
+      plot(LCP_SLO_vect, col = "black", lwd = 0.1, add = TRUE)
+      plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
+      
+      plot(italy_cont, col = "grey95", border = "grey50", axes = FALSE, mar = c(1, 1, 1, 1))
+      plot(LCP_POR_dis_vect, col = "black", lwd = 0.1, add = TRUE)
+      plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
+      
+      plot(italy_cont, col = "grey95", border = "grey50", axes = FALSE, mar = c(1, 1, 1, 1))
+      plot(LCP_POR_res_vect, col = "black", lwd = 0.1, add = TRUE)
+      plot(wolf_points, col = "red", pch = 16, cex = 0.3, add = TRUE)
+      
+      dev.off()
