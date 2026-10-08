@@ -1,5 +1,3 @@
-# Updated: 26-08-2026
-
 ##################################################################
 ######################### MODEL PORTUGAL #########################
 ##################################################################
@@ -324,38 +322,16 @@
   plot(high_cond_res, mar = c(2, 2, 2, 5))
   dev.off()
   
-###################################
-### Relative selection strength ###
-###################################
-  
-# Useful for the Circuitscape analysis
-
-# Dispersers:   
-  RSS_dis <- exp(sum_covs_dis)
-  terra::writeRaster(RSS_dis, filename = "/Volumes/Storage/data_processed/cond_rss_dis_POR.tif", overwrite = TRUE)
-  pdf("/Volumes/Storage/figures/conductance_rss_dis_POR.pdf", width = 6.3, height = 6.3)
-  plot(log10(RSS_dis), mar = c(2, 2, 2, 5))
-  dev.off()
-  
-# Residents
-  RSS_res <- exp(sum_covs_res)
-  terra::writeRaster(RSS_res, filename = "/Volumes/Storage/data_processed/cond_rss_res_POR.tif", overwrite = TRUE)
-  pdf("/Volumes/Storage/figures/conductance_rss_res_POR.pdf", width = 6.3, height = 6.3)
-  plot(log10(RSS_res), mar = c(2, 2, 2, 5))
-  dev.off()
-  
 #################################
 ### Creating a resistance map ###
 #################################
   
   # Resistance is the inverse of conductance: 1/P
   
-  ### CHECK THIS!!! ###
-  # Circuitscape cannot handle super low numbers. 
-  # The sum of covs is currently 8 * 10^-15 (−32.45 linear predictor), with 1/P it gives 1.24 x 10^14, 
-  # When running circuitscape on such a huge range of numbers, it would crash or give weirtd results.
-  # Interestingly such low numbers are simply barriers, dense urban already hard to pass, 
-  # so flattening it with a cap costs nothing. 
+  # The sum of covs reaches -30.14 (p = 8e-14), with 1/P it gives 1.23e13, 
+  # This can potentially make LCP crash or give weird results.
+  # Interestingly such low numbers are simply barriers, like dense urban or agriculture areas already hard to pass, 
+  # so adding a cap doesn't cost much
   # The 1st percentile of the linear predictor is -7.22 (p ≈ 0.0007), so capping the lower end at -8 leaves more than 99% of the data untouched
   # Careful: the resistance calculation is a choice (NOT in Rio-Maior's article)
 
@@ -455,16 +431,28 @@
 ### Saving some figures in pdf ###
 ##################################
   
-  resist_SLO     <- rast("/Volumes/Storage/data_processed/resist_cap8_SLO.tif")
-  resist_POR_dis <- rast("/Volumes/Storage/data_processed/resist_cap8_dis_POR.tif")
-  resist_POR_res <- rast("/Volumes/Storage/data_processed/resist_cap8_res_POR.tif")
+  resist_SLO <- rast("/Volumes/Storage/data_processed/resist_cap10_SLO.tif")
+  resist_POR_dis <- rast("/Volumes/Storage/data_processed/resist_cap10_dis_POR.tif")
+  resist_POR_res <- rast("/Volumes/Storage/data_processed/resist_cap10_res_POR.tif")
   
-  pdf("/Volumes/Storage/figures/composite_resistance_cap8.pdf",
-      width = 6.3, height = 2.1)   # A4 text-column width, 3 stacked panels
-    par(mfrow = c(1, 3), mar = c(1, 1, 1, 1))
+  pdf("/Volumes/Storage/figures/composite_resistance_cap10.pdf",
+      width = 6.3, height = 6.3)   # A4 text-column width, 3 stacked panels
+    par(mfrow = c(2, 2), mar = c(1, 1, 1, 1))
     plot(log10(resist_SLO), )
     plot(log10(resist_POR_dis))
     plot(log10(resist_POR_res))
+    dev.off()
+    
+  cond_SLO <- rast("/Volumes/Storage/data_processed/cond_cap10_SLO.tif")
+  cond_POR_dis <- rast("/Volumes/Storage/data_processed/cond_cap10_dis_POR.tif")
+  cond_POR_res <- rast("/Volumes/Storage/data_processed/cond_cap10_res_POR.tif")
+  
+  pdf("/Volumes/Storage/figures/composite_conductance_cap10.pdf",
+      width = 6.3, height = 2.1)   # A4 text-column width, 3 stacked panels
+    par(mfrow = c(1, 3), mar = c(1, 1, 1, 1))
+    plot(log10(cond_SLO), )
+    plot(log10(cond_POR_dis))
+    plot(log10(cond_POR_res))
     dev.off()
     
 #############################
