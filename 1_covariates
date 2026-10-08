@@ -1,10 +1,8 @@
-# Updataed: 26-08-2026
-
 ##################################################################
 ######################### COVARIATE HUNT #########################
 ##################################################################
 
-# Studies
+# Studies:
   
 # Slovakia model: Guimarães, N. F., Álvares, F., Kropil, R., & Smolko, P. (2025). 
     # Where the wolves wander? Habitat selection of grey wolves in relation to 
@@ -16,9 +14,8 @@
     # selection and functional connectivity to inform large carnivore conservation. 
     # Biological Conservation, 235, 178–188. https://doi.org/10.1016/j.biocon.2019.04.021
 
-# Covariate and associated study (in order found in script)
-  
-# Water bodies
+# Covariate and associated study (in order found in script):
+  # Water bodies
   # Distance to water (Guimarães et al., 2025)
   # Rivers (Rio-Maior et al., 2019)
   # Streams (Rio-Maior et al., 2019)
@@ -106,8 +103,8 @@
   
   # Saving as processed data
     terra::writeVector(italy_cont, 
-      filename = "/Volumes/Storage/data_processed/italy_cont.gpkg", overwrite = TRUE)
-      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+      filename = "/Volumes/Storage/data_processed/italy_cont_3035.gpkg", overwrite = TRUE)
+       
   
 # EPSG:4326
     
@@ -133,7 +130,7 @@
   # Saving as processed data
     terra::writeVector(italy_cont_4326, 
       filename = "/Volumes/Storage/data_processed/italy_cont_4326.gpkg", overwrite = TRUE)
-      # "overwrite = TRUE" allows R to replace any file with the same existing name
+      
 
 #########################################
 ### Preparing water bodies covariates ###
@@ -219,7 +216,7 @@
   # Saving as processed data
     terra::writeRaster(dist_water_source_r, 
       filename = "/Volumes/Storage/data_processed/dist_water_source_r.tif", overwrite = TRUE)
-      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+       
 
 # Rivers and streams:
   
@@ -275,7 +272,7 @@
   
     terra::writeRaster(rivers_prop_r,
       filename  = "/Volumes/Storage/data_processed/rivers_50m.tif", overwrite = TRUE)
-      # "overwrite = TRUE" allows R to replace any file with the same existing name 
+       
 
 
 #######################################
@@ -364,7 +361,7 @@
   terra::writeRaster(eastness_50m, 
     filename = "/Volumes/Storage/data_processed/eastness_50m.tif", 
     overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+     
 
 
 ######################################################
@@ -397,7 +394,8 @@
     # Shrubland: CORINE 221, 222, 322, 324 (raster values : 15, 16, 27, 29; level 4)
     # Meadows: CORINE 231, 242, 243, 321, 333 (raster values : 18, 20, 21, 26, 32; level 5)
     # Agriculture: CORINE 211, 241 (raster values : 12, 19; level 6)
-  # Open: CORINE 321, 231, 211, 241, 212 (raster values : 26, 18, 12, 13, 19)
+  # Open: CORINE 211, 212, 213, 221, 222, 223, 231, 241, 242, 243, 244, 331, 332, 334 
+    # (raster values : 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 30, 31, 33)
 
 # Calling the raw data 
   landcover <- rast("/Volumes/Storage/raw_data/landcover.tif")
@@ -445,9 +443,6 @@
     plot(landcover_it_6) # Looks good, not too much blank space
     freq(landcover_it_6) # looks good too, all 7 levels are present, no NAs
       # Class 7 is 15844942 cells (total is 100704974), which represents 15,73%
-      class_7 <- freq(landcover)[freq(landcover)$value == 7, "count"] 
-      class_7 # 49697 cells
-      class_7 * 2500 / 1e6 # 124.2425 km2
     
   # Aligning the covariate to template (50m)
     landcover_it_6 <- resample(landcover_it_6, template, method = "near")
@@ -457,7 +452,7 @@
   # Saving as processed data
     terra::writeRaster(landcover_it_6, 
       filename = "/Volumes/Storage/data_processed/landcover_it_6.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+     
 
 # Open covariate:
 
@@ -491,7 +486,7 @@
     open[is.na(open)] <- 0
   
   # Resampling the cells to a 50m resolution (from the 100m original resolution)
-    open_50 <- resample(open, template, )
+    open_50 <- resample(open, template, method = "near")
       # Choosing the near method as 0 and 1 are categorical values
   
   # Changing 0 values outside italy_cont to NA values
@@ -521,7 +516,7 @@
   # Saving as processed data
     terra::writeRaster(open_prop, 
       filename = "/Volumes/Storage/data_processed/open.tif", overwrite = TRUE)
-      # "overwrite = TRUE" allows R to replace any file with the same existing name
+      
 
 ##############################################
 ### Preparing tree cover density covariate ###
@@ -534,12 +529,7 @@
   # European Environment Agency. (2018). Tree Cover Density 2015 (raster 20 m), 
     # Europe, 3-yearly, Mar. 2018 (Version 05.00) [GeoTIFF]. European Environment 
     # Agency. https://doi.org/10.2909/8BFBDA74-7B62-4659-96DD-86600EA425A2
-  
-# NOTE: substituted for TCD 2018-present (10 m) due to CLMS processing delay
-  # on the original order (as of [date]). 2015 is the closest available
-  # epoch; tree cover density is not expected to change drastically over
-  # a 3-4 year gap outside of major fire/logging events.
-  # Tiles used: E40N20 (northern/central Italy) + E40N10 (southern Italy) + E50N10
+    # Tiles used: E40N20 (northern/central Italy) + E40N10 (southern Italy) + E50N10
   
 # Calling the raw data
   tree_cover_N20 <- rast("/Volumes/Storage/raw_data/tree_E40N20.tif")
@@ -569,7 +559,7 @@
 # Saving raster as processed data
   terra::writeRaster(tree_cover_50m, 
     filename = "/Volumes/Storage/data_processed/tree_cover_50m.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name
+    
 
 ############################################
 ### Preparing Night-Time light covariate ###
@@ -613,7 +603,7 @@
 # Saving raster as processed data
   terra::writeRaster(night_light_it, 
     filename = "/Volumes/Storage/data_processed/night_light_it.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+     
 
 ###############################################
 ### Preparing snow cover duration covariate ###
@@ -649,7 +639,7 @@
 # Saving raster as processed data
   terra::writeRaster(snow_3035, 
     filename = "/Volumes/Storage/data_processed/snow_3035.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name
+    
 
 #################################
 ### Preparing roads covariate ###
@@ -717,7 +707,7 @@
 # Saving raster as processed data
   terra::writeRaster(roads_prop_r, 
     filename = "/Volumes/Storage/data_processed/roads_it.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name
+    
 
 ##################################
 ### Preparing trails covariate ###
@@ -791,7 +781,7 @@
 # Saving raster as processed data
   terra::writeRaster(trails_prop_r, 
     filename = "/Volumes/Storage/data_processed/trails_it.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+     
 
 #######################################
 ### Preparing settlements covariate ###
@@ -855,7 +845,7 @@
 # Saving as processed data
   terra::writeRaster(sett_prop, 
     filename = "/Volumes/Storage/data_processed/sett_50m.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name 
+     
 
 #####################################
 ### Preparing livestock covariate ###
@@ -922,7 +912,7 @@
 # Save raster as processed data
   terra::writeRaster(livestock_50m, 
     filename = "/Volumes/Storage/data_processed/livestock_it.tif", overwrite = TRUE)
-    # "overwrite = TRUE" allows R to replace any file with the same existing name
+    
 
 ################################################################
 ###  Checking that all 9 Rio-Maior et al., 2019 covariates align togehter ###
@@ -1011,24 +1001,6 @@ for (x in names(gui_data)) {
   global(open, c("min","max", "mean", "sd"), na.rm=TRUE) # 0   1 0.5281006 0.4623533
   global(rivers, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.04853503 6.139596e-05 0.001086224
   global(streams, c("min","max", "mean", "sd"), na.rm=TRUE) # 0 0.05007223 0.0002063524 0.001985559
-  
- # Individual plots (not necessary, but there if needed)
-    # Some require some tweeking for titles and so on
-  plot(slope, main = "Slope (°)")
-  plot(eastness, main = "Eastness (°)")
-  plot(water, main = "Distance to water (m)")
-  plot(tree, main = "Tree cover density (%)")
-  plot(snow, main = "Snow cover duration (days)")
-  plot(landcover, main = "Landcover type (6 levels)")
-  plot(light, main = expression("Night-time light (nW/cm"^2*"/sr)"))
-  plot(roads, main = expression("Proportion of occupation", "by paved roads (m/m"^2*")"))
-  plot(trails, main = expression("Proportion of occupation by unpaved roads and pedestrian trails (m/m"^2*")"))
-  plot(settlement, main = "Proportion of occupation by human settlements")
-  plot(livestock, main = expression("Average livestock density ([LU]/km"^2*")"))
-  plot(elevation, main = "Average elevation above sea level (m)")
-  plot(open, main = "Proportion of occupation by open areas, permanent pastures, agriculture")
-  plot(rivers, main = expression("Proportion of occupation by 1st and 2nd order waterlines (m/m"^2*")"))
-  plot(streams, main = expression("Proportion of occupation by 3rd, 4th and 5th order waterlines (m/m"^2*")"))
 
 # Saving as a pdf pannel of the covariates
   rio <- c(roads, trails, settlement, livestock, elevation, slope, open, rivers, streams)
@@ -1049,6 +1021,13 @@ for (x in names(gui_data)) {
     plot(landcover, main = "", mar = c(2, 2, 2, 5), type = "classes")
     plot(light,     main = "", mar = c(2, 2, 2, 5))
     dev.off()
+    
+  # Saving en elevation map with wolf locations for the Study Area section
+    wolf_points <- vect("/Volumes/Storage/data_processed/wolf_pts_clean.gpkg")
+    pdf("/Volumes/Storage/figures/study_area_points.pdf", width = 6.3, height = 6.3)
+      plot(elevation)
+      plot(wolf_points, add = TRUE, col = "red", pch = 16, cex = 0.4)
+      dev.off()
 
 #############################
 ### END OF COVARIATE HUNT ###
